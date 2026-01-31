@@ -65,19 +65,22 @@ install_via_pip() {
         install_pip
     fi
     
-    # Install the package
+    # Install the package with --break-system-packages if needed
     if command_exists pip3; then
-        pip3 install --user git+${REPO_URL}.git
+        pip3 install --user --break-system-packages git+${REPO_URL}.git 2>/dev/null || pip3 install --user git+${REPO_URL}.git
     else
-        python3 -m pip install --user git+${REPO_URL}.git
+        python3 -m pip install --user --break-system-packages git+${REPO_URL}.git 2>/dev/null || python3 -m pip install --user git+${REPO_URL}.git
     fi
     
-    # Add ~/.local/bin to PATH if not already there
+    # Add ~/.local/bin to PATH immediately
+    export PATH="$HOME/.local/bin:$PATH"
+    
+    # Add to shell configs if not already there
     if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
         echo "📝 Adding ~/.local/bin to PATH..."
-        echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc 2>/dev/null || true
         echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc 2>/dev/null || true
-        export PATH="$HOME/.local/bin:$PATH"
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile 2>/dev/null || true
     fi
     
     echo "✅ Installed via pip successfully!"
@@ -140,7 +143,13 @@ main() {
     echo "   drive-master MyDrive      # Mount specific drive"
     echo "   drive-master --version    # Show version"
     echo ""
-    echo "💡 If command not found, restart terminal or run: source ~/.bashrc"
+    
+    # Test if command works immediately
+    if command_exists drive-master || [ -f "$HOME/.local/bin/drive-master" ]; then
+        echo "✅ Command is ready to use!"
+    else
+        echo "💡 Restart terminal or run: export PATH=\"\$HOME/.local/bin:\$PATH\""
+    fi
 }
 
 # Check if running as root (not recommended)

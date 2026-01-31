@@ -1,0 +1,2 @@
+[console_scripts]
+drive-master = mount_drive:main
