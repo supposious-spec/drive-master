@@ -619,6 +619,32 @@ def auto_format_usb(label, info):
     print(f"{Colors.MAGENTA}{Colors.BOLD}🚀 AUTO FORMAT: {label}{Colors.END}")
     print_separator()
     
+    # Check if required tools are installed
+    required_tools = ['fdisk', 'mkfs.vfat', 'mkfs.ntfs', 'mkfs.ext4']
+    missing_tools = []
+    
+    for tool in required_tools:
+        if not shutil.which(tool):
+            missing_tools.append(tool)
+    
+    if missing_tools:
+        print_error(f"Missing required tools: {', '.join(missing_tools)}")
+        print_info("Installing missing tools...")
+        try:
+            if shutil.which('apt-get'):
+                subprocess.run(['sudo', 'apt-get', 'install', '-y', 'util-linux', 'dosfstools', 'ntfs-3g', 'e2fsprogs'], check=True)
+            elif shutil.which('yum'):
+                subprocess.run(['sudo', 'yum', 'install', '-y', 'util-linux', 'dosfstools', 'ntfs-3g', 'e2fsprogs'], check=True)
+            elif shutil.which('dnf'):
+                subprocess.run(['sudo', 'dnf', 'install', '-y', 'util-linux', 'dosfstools', 'ntfs-3g', 'e2fsprogs'], check=True)
+            else:
+                print_error("Please install missing tools manually")
+                return
+            print_success("Tools installed successfully!")
+        except subprocess.CalledProcessError:
+            print_error("Failed to install required tools")
+            return
+    
     # Warning
     print(f"{Colors.RED}{Colors.BOLD}⚠️  WARNING: This will ERASE ALL DATA on {label}!{Colors.END}")
     print(f"{Colors.RED}Device: {info['device']} ({info['size']}){Colors.END}")
@@ -1284,6 +1310,32 @@ def auto_fix_format_drive(drives_found):
     print(f"{Colors.MAGENTA}{Colors.BOLD}🚀 AUTO FIX FORMAT{Colors.END}")
     print_separator()
     
+    # Check if required tools are installed
+    required_tools = ['fdisk', 'mkfs.vfat', 'mkfs.ntfs', 'mkfs.ext4']
+    missing_tools = []
+    
+    for tool in required_tools:
+        if not shutil.which(tool):
+            missing_tools.append(tool)
+    
+    if missing_tools:
+        print_error(f"Missing required tools: {', '.join(missing_tools)}")
+        print_info("Installing missing tools...")
+        try:
+            if shutil.which('apt-get'):
+                subprocess.run(['sudo', 'apt-get', 'install', '-y', 'util-linux', 'dosfstools', 'ntfs-3g', 'e2fsprogs'], check=True)
+            elif shutil.which('yum'):
+                subprocess.run(['sudo', 'yum', 'install', '-y', 'util-linux', 'dosfstools', 'ntfs-3g', 'e2fsprogs'], check=True)
+            elif shutil.which('dnf'):
+                subprocess.run(['sudo', 'dnf', 'install', '-y', 'util-linux', 'dosfstools', 'ntfs-3g', 'e2fsprogs'], check=True)
+            else:
+                print_error("Please install missing tools manually")
+                return
+            print_success("Tools installed successfully!")
+        except subprocess.CalledProcessError:
+            print_error("Failed to install required tools")
+            return
+    
     for i, drive in enumerate(drives_found, 1):
         print(f"{Colors.CYAN}[{i}]{Colors.END} {drive['name']} - {drive['size']} - {drive['model']}")
     
@@ -1421,6 +1473,19 @@ def auto_format_drive_direct(label, info, fs_choice):
             print_error("Invalid choice!")
     except (ValueError, click.Abort):
         print_error("Invalid input!")
+    """Get latest version from GitHub"""
+    try:
+        import urllib.request
+        import json
+        
+        url = "https://api.github.com/repos/supposious-spec/drive-master/releases/latest"
+        with urllib.request.urlopen(url, timeout=5) as response:
+            data = json.loads(response.read().decode())
+            return data.get('tag_name', '').replace('v', '')
+    except:
+        return None
+
+def get_latest_version():
     """Get latest version from GitHub"""
     try:
         import urllib.request
