@@ -5,7 +5,7 @@ import sys
 import time
 import shutil
 
-VERSION = "2.4.0"
+VERSION = "3.0.0"
 
 # Colors and styling
 class Colors:
@@ -26,24 +26,32 @@ def get_terminal_width():
     return shutil.get_terminal_size().columns
 
 def print_banner():
-    """Print animated banner"""
+    """Print centered animated banner"""
     width = get_terminal_width()
+    # Ensure minimum width for banner
+    if width < 80:
+        width = 80
+    
+    # Calculate padding for centering
+    logo_width = 78  # Approximate width of the ASCII art
+    padding = max(0, (width - logo_width) // 2)
+    
     banner = f"""{Colors.CYAN}{Colors.BOLD}
-╔{'═' * (width - 2)}╗
-║{' ' * (width - 2)}║
-║{Colors.MAGENTA}    ██████╗ ██████╗ ██╗██╗   ██╗███████╗    ███╗   ███╗ █████╗ ███████╗████████╗███████╗██████╗ {Colors.CYAN}║
-║{Colors.MAGENTA}    ██╔══██╗██╔══██╗██║██║   ██║██╔════╝    ████╗ ████║██╔══██╗██╔════╝╚══██╔══╝██╔════╝██╔══██╗{Colors.CYAN}║
-║{Colors.MAGENTA}    ██║  ██║██████╔╝██║██║   ██║█████╗      ██╔████╔██║███████║███████╗   ██║   █████╗  ██████╔╝{Colors.CYAN}║
-║{Colors.MAGENTA}    ██║  ██║██╔══██╗██║╚██╗ ██╔╝██╔══╝      ██║╚██╔╝██║██╔══██║╚════██║   ██║   ██╔══╝  ██╔══██╗{Colors.CYAN}║
-║{Colors.MAGENTA}    ██████╔╝██║  ██║██║ ╚████╔╝ ███████╗    ██║ ╚═╝ ██║██║  ██║███████║   ██║   ███████╗██║  ██║{Colors.CYAN}║
-║{Colors.MAGENTA}    ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝  ╚══════╝    ╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝{Colors.CYAN}║
-║{' ' * (width - 2)}║
-║{Colors.YELLOW}{Colors.BOLD}{'Auto-Mount NTFS Drives with Style'.center(width - 2)}{Colors.CYAN}║
-║{Colors.WHITE}{'v' + VERSION + ' | Professional Linux Drive Manager'.center(width - 2)}{Colors.CYAN}║
-║{' ' * (width - 2)}║
-║{Colors.GREEN}{Colors.BOLD}{'🚀 Developed by Ali Hamza 🚀'.center(width - 2)}{Colors.CYAN}║
-║{' ' * (width - 2)}║
-╚{'═' * (width - 2)}╝{Colors.END}
+{' ' * padding}╔{'═' * (logo_width - 2)}╗
+{' ' * padding}║{' ' * (logo_width - 2)}║
+{' ' * padding}║{Colors.MAGENTA}  ██████╗ ██████╗ ██╗██╗   ██╗███████╗    ███╗   ███╗ █████╗ ███████╗████████╗███████╗██████╗  {Colors.CYAN}║
+{' ' * padding}║{Colors.MAGENTA}  ██╔══██╗██╔══██╗██║██║   ██║██╔════╝    ████╗ ████║██╔══██╗██╔════╝╚══██╔══╝██╔════╝██╔══██╗{Colors.CYAN}║
+{' ' * padding}║{Colors.MAGENTA}  ██║  ██║██████╔╝██║██║   ██║█████╗      ██╔████╔██║███████║███████╗   ██║   █████╗  ██████╔╝{Colors.CYAN}║
+{' ' * padding}║{Colors.MAGENTA}  ██║  ██║██╔══██╗██║╚██╗ ██╔╝██╔══╝      ██║╚██╔╝██║██╔══██║╚════██║   ██║   ██╔══╝  ██╔══██╗{Colors.CYAN}║
+{' ' * padding}║{Colors.MAGENTA}  ██████╔╝██║  ██║██║ ╚████╔╝ ███████╗    ██║ ╚═╝ ██║██║  ██║███████║   ██║   ███████╗██║  ██║{Colors.CYAN}║
+{' ' * padding}║{Colors.MAGENTA}  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝  ╚══════╝    ╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝{Colors.CYAN}║
+{' ' * padding}║{' ' * (logo_width - 2)}║
+{' ' * padding}║{Colors.YELLOW}{Colors.BOLD}{'Auto-Mount NTFS Drives with Style'.center(logo_width - 2)}{Colors.CYAN}║
+{' ' * padding}║{Colors.WHITE}{'v' + VERSION + ' | Professional Linux Drive Manager'.center(logo_width - 2)}{Colors.CYAN}║
+{' ' * padding}║{' ' * (logo_width - 2)}║
+{' ' * padding}║{Colors.GREEN}{Colors.BOLD}{'🚀 Developed by Ali Hamza 🚀'.center(logo_width - 2)}{Colors.CYAN}║
+{' ' * padding}║{' ' * (logo_width - 2)}║
+{' ' * padding}╚{'═' * (logo_width - 2)}╝{Colors.END}
 """
     print(banner)
 
@@ -235,16 +243,6 @@ def get_all_drives():
         print_error(f"Failed to scan drives: {str(e)}")
     
     return drives
-                        'uuid': '',
-                        'type': drive_type,
-                        'model': model,
-                        'transport': transport
-                    }
-                    
-    except Exception as e:
-        print_error(f"Failed to scan drives: {str(e)}")
-    
-    return drives
 
 def list_drives(drives):
     """List all drives with detailed information."""
@@ -356,6 +354,8 @@ def mount_drive_enhanced(info, name):
             print(f"{Colors.YELLOW}💡 Suggestion:{Colors.END} Run 'sudo ntfsfix {info['device']}' to fix filesystem errors")
         else:
             print(f"{Colors.YELLOW}💡 Suggestion:{Colors.END} Check if drive is corrupted or needs repair")
+
+def mount_menu(drives):
     """Interactive mount menu"""
     # Filter mountable drives (NTFS, ext4, etc.)
     mountable = {name: info for name, info in drives.items() 
@@ -475,7 +475,7 @@ def unmount_drive(name):
             pass  # Directory not empty or doesn't exist
     else:
         print_error(f"Failed to unmount {name}")
-def mount_drive(uuid, name, dev):
+        print(f"{Colors.YELLOW}💡 Suggestion:{Colors.END} Close any files/programs using this drive and try again")
     """Mount the drive with enhanced UI."""
     user = os.getlogin()
     mount_point = f"/media/{user}/{name}"
@@ -601,15 +601,44 @@ def format_usb_drive():
         print_error("Invalid input!")
 
 def format_drive_enhanced(label, info):
-    """Enhanced formatting with better options"""
+    """Enhanced formatting with partition options"""
     # Warning
     print_separator()
-    print(f"{Colors.RED}{Colors.BOLD}⚠️  WARNING: This will ERASE ALL DATA on {label}!{Colors.END}")
+    print(f"{Colors.RED}{Colors.BOLD}⚠️  WARNING: This will ERASE DATA on {label}!{Colors.END}")
     print(f"{Colors.RED}Device: {info['device']} ({info['size']}){Colors.END}")
     print(f"{Colors.RED}Model: {info['model']}{Colors.END}")
     
     if not click.confirm(f"{Colors.RED}Are you absolutely sure?{Colors.END}"):
         print_info("Format cancelled")
+        return
+    
+    # Choose format scope
+    print_separator()
+    print(f"{Colors.BLUE}{Colors.BOLD}💾 FORMAT SCOPE{Colors.END}")
+    print(f"{Colors.CYAN}[1]{Colors.END} Format entire drive (delete all partitions)")
+    print(f"{Colors.CYAN}[2]{Colors.END} Format specific partition only")
+    
+    try:
+        scope_choice = int(click.prompt(f"{Colors.BLUE}Select format scope{Colors.END}", type=int))
+        
+        if scope_choice == 1:
+            # Format entire drive
+            target_device = info['parent']
+            print_warning(f"Will delete ALL partitions on {target_device}")
+        elif scope_choice == 2:
+            # Format specific partition
+            target_device = info['device']
+            print_info(f"Will format partition {target_device} only")
+        else:
+            print_error("Invalid choice!")
+            return
+            
+        if not click.confirm(f"{Colors.RED}Continue with {target_device}?{Colors.END}"):
+            print_info("Format cancelled")
+            return
+            
+    except (ValueError, click.Abort):
+        print_error("Invalid input!")
         return
     
     # Choose format type
@@ -643,30 +672,43 @@ def format_drive_enhanced(label, info):
         print_loading(f"Unmounting {label}...")
         subprocess.run(['sudo', 'umount', info['device']], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
-    # Format based on choice
+    # Format based on scope and choice
     format_msg = "Quick formatting" if quick_format else "Full formatting"
+    
+    if scope_choice == 1:  # Entire drive
+        print_loading(f"Deleting all partitions on {target_device}...")
+        # Wipe partition table
+        subprocess.run(['sudo', 'wipefs', '-a', target_device], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Create new partition table
+        subprocess.run(['sudo', 'parted', target_device, 'mklabel', 'gpt'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Create single partition
+        subprocess.run(['sudo', 'parted', target_device, 'mkpart', 'primary', '0%', '100%'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Set target to first partition
+        target_device = f"{target_device}1"
+    
+    # Format the target device/partition
     if fs_choice == 1:  # FAT32
-        print_loading(f"{format_msg} {label} as FAT32...")
+        print_loading(f"{format_msg} {target_device} as FAT32...")
         cmd = ['sudo', 'mkfs.fat', '-F', '32', '-n', label[:11]]  # FAT32 label limit
         if not quick_format:
             cmd.extend(['-v'])  # Verbose for full format
-        cmd.append(info['device'])
+        cmd.append(target_device)
         result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     elif fs_choice == 2:  # NTFS
-        print_loading(f"{format_msg} {label} as NTFS...")
+        print_loading(f"{format_msg} {target_device} as NTFS...")
         cmd = ['sudo', 'mkfs.ntfs', '-L', label]
         if quick_format:
             cmd.extend(['-f'])  # Fast format
         else:
             cmd.extend(['-z'])  # Zero entire disk
-        cmd.append(info['device'])
+        cmd.append(target_device)
         result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     elif fs_choice == 3:  # EXT4
-        print_loading(f"{format_msg} {label} as EXT4...")
+        print_loading(f"{format_msg} {target_device} as EXT4...")
         cmd = ['sudo', 'mkfs.ext4', '-F', '-L', label]
         if not quick_format:
             cmd.extend(['-c'])  # Check for bad blocks
-        cmd.append(info['device'])
+        cmd.append(target_device)
         result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
         print_error("Invalid filesystem choice!")
@@ -675,6 +717,8 @@ def format_drive_enhanced(label, info):
     if result.returncode == 0:
         print_success(f"Successfully formatted {label}!")
         print(f"{Colors.GREEN}🎉 Your drive is ready to use{Colors.END}")
+        if scope_choice == 1:
+            print_info("All partitions were deleted and drive was reformatted")
     else:
         print_error(f"Format failed for {label}")
         print(f"{Colors.YELLOW}💡 Suggestion:{Colors.END} Check if drive is write-protected or damaged")

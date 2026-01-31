@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='drive-master',
-    version='2.4.0',
+    version='3.0.0',
     py_modules=['mount_drive'],
     install_requires=['click'],
     entry_points={
