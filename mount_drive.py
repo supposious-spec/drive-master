@@ -28,23 +28,22 @@ def get_terminal_width():
 def print_banner():
     """Print centered animated banner"""
     width = get_terminal_width()
-    # Ensure minimum width for banner
-    if width < 80:
-        width = 80
+    if width < 100:
+        width = 100
     
-    # Calculate padding for centering
-    logo_width = 78  # Approximate width of the ASCII art
+    # ASCII art fits in 96 characters
+    logo_width = 98
     padding = max(0, (width - logo_width) // 2)
     
     banner = f"""{Colors.CYAN}{Colors.BOLD}
 {' ' * padding}╔{'═' * (logo_width - 2)}╗
 {' ' * padding}║{' ' * (logo_width - 2)}║
-{' ' * padding}║{Colors.MAGENTA}  ██████╗ ██████╗ ██╗██╗   ██╗███████╗    ███╗   ███╗ █████╗ ███████╗████████╗███████╗██████╗  {Colors.CYAN}║
-{' ' * padding}║{Colors.MAGENTA}  ██╔══██╗██╔══██╗██║██║   ██║██╔════╝    ████╗ ████║██╔══██╗██╔════╝╚══██╔══╝██╔════╝██╔══██╗{Colors.CYAN}║
-{' ' * padding}║{Colors.MAGENTA}  ██║  ██║██████╔╝██║██║   ██║█████╗      ██╔████╔██║███████║███████╗   ██║   █████╗  ██████╔╝{Colors.CYAN}║
-{' ' * padding}║{Colors.MAGENTA}  ██║  ██║██╔══██╗██║╚██╗ ██╔╝██╔══╝      ██║╚██╔╝██║██╔══██║╚════██║   ██║   ██╔══╝  ██╔══██╗{Colors.CYAN}║
-{' ' * padding}║{Colors.MAGENTA}  ██████╔╝██║  ██║██║ ╚████╔╝ ███████╗    ██║ ╚═╝ ██║██║  ██║███████║   ██║   ███████╗██║  ██║{Colors.CYAN}║
-{' ' * padding}║{Colors.MAGENTA}  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝  ╚══════╝    ╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝{Colors.CYAN}║
+{' ' * padding}║{Colors.MAGENTA} ██████╗ ██████╗ ██╗██╗   ██╗███████╗    ███╗   ███╗ █████╗ ███████╗████████╗███████╗██████╗  {Colors.CYAN}║
+{' ' * padding}║{Colors.MAGENTA} ██╔══██╗██╔══██╗██║██║   ██║██╔════╝    ████╗ ████║██╔══██╗██╔════╝╚══██╔══╝██╔════╝██╔══██╗ {Colors.CYAN}║
+{' ' * padding}║{Colors.MAGENTA} ██║  ██║██████╔╝██║██║   ██║█████╗      ██╔████╔██║███████║███████╗   ██║   █████╗  ██████╔╝ {Colors.CYAN}║
+{' ' * padding}║{Colors.MAGENTA} ██║  ██║██╔══██╗██║╚██╗ ██╔╝██╔══╝      ██║╚██╔╝██║██╔══██║╚════██║   ██║   ██╔══╝  ██╔══██╗ {Colors.CYAN}║
+{' ' * padding}║{Colors.MAGENTA} ██████╔╝██║  ██║██║ ╚████╔╝ ███████╗    ██║ ╚═╝ ██║██║  ██║███████║   ██║   ███████╗██║  ██║ {Colors.CYAN}║
+{' ' * padding}║{Colors.MAGENTA} ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝  ╚══════╝    ╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝   ╚═╝   ╚══════╝╚═╝  ╚═╝ {Colors.CYAN}║
 {' ' * padding}║{' ' * (logo_width - 2)}║
 {' ' * padding}║{Colors.YELLOW}{Colors.BOLD}{'Auto-Mount NTFS Drives with Style'.center(logo_width - 2)}{Colors.CYAN}║
 {' ' * padding}║{Colors.WHITE}{'v' + VERSION + ' | Professional Linux Drive Manager'.center(logo_width - 2)}{Colors.CYAN}║
@@ -1001,8 +1000,7 @@ def fix_hidden_drives():
     print_info("Scanning for all drives including hidden ones...")
     
     try:
-        # Get raw drive info including unpartitioned drives
-        fdisk_output = subprocess.check_output(['sudo', 'fdisk', '-l'], stderr=subprocess.DEVNULL, text=True)
+        # Get raw drive info using lsblk (safer than fdisk)
         lsblk_raw = subprocess.check_output(['lsblk', '-d', '-o', 'NAME,SIZE,MODEL,TRAN'], stderr=subprocess.DEVNULL, text=True)
         
         print_separator()
@@ -1060,7 +1058,7 @@ def fix_hidden_drives():
             
     except Exception as e:
         print_error(f"Failed to scan drives: {str(e)}")
-        print_info("Make sure you have sudo permissions")
+        print_info("Make sure you have proper permissions")
 
 def create_partition_table(drives_found):
     """Create partition table on unpartitioned drive"""
