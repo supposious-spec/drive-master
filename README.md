@@ -12,11 +12,13 @@
 - 🔌 **Selective Operations**: Mount only unmounted drives, unmount only mounted drives
 - 📂 **Path Display**: Shows exact mount paths for easy access
 - 📊 **Status Indicators**: Visual status with color-coded drive information
+- 💾 **USB Formatter**: Format USB drives with FAT32/NTFS/EXT4 filesystems
 - 🔄 **Auto-Update**: Built-in update functionality
 - 🛡️ **Safe Operations**: Confirmation prompts for destructive actions
 - ⚡ **Direct Mount**: Mount specific drives instantly by name
 - 📂 **Permission Handling**: Automatically sets correct ownership (uid/gid)
 - 🛠️ **Smart Fix**: Suggests fixes if drives fail to mount
+- 🗑️ **Easy Uninstall**: Built-in uninstaller for clean removal
 
 ---
 
@@ -82,6 +84,8 @@ drive-master
 - `4`: ⚡ Mount all unmounted drives (smart mounting)
 - `5`: 🚫 Unmount all mounted drives (with confirmation)
 - `6`: 🔄 Update Drive Master to latest version
+- `7`: 💾 Format USB Drive (FAT32/NTFS/EXT4)
+- `8`: 🗑️ Uninstall Drive Master
 - `Q`: 🚪 Exit the tool
 
 ### 2️⃣ Direct Mounting
@@ -126,8 +130,37 @@ sudo mv /tmp/drive-master /usr/local/bin/drive-master
 
 ---
 
+## 🗑️ Uninstallation
+
+### **Method 1: Built-in Uninstaller (Recommended)**
+Use the built-in uninstaller from the menu:
+1. Run `drive-master`
+2. Select option `8` (🗑️ Uninstall Drive Master)
+3. Confirm removal
+
+### **Method 2: Standalone Uninstaller**
+```bash
+curl -sSL https://raw.githubusercontent.com/supposious-spec/drive-master/main/uninstall.sh | bash
+```
+
+### **Method 3: Manual Removal**
+```bash
+# Remove via pip
+pip3 uninstall drive-master -y
+
+# Remove binaries
+sudo rm -f /usr/local/bin/drive-master
+rm -f ~/.local/bin/drive-master
+
+# Clean up directories
+rm -rf ~/.local/lib/python*/site-packages/drive_master*
+```
+
+---
+
 ## 🔢 Version History
 
+- **v2.1.0** - USB formatting, built-in uninstaller, enhanced drive management
 - **v2.0.0** - Enhanced UI, unmount functionality, smart drive management, auto-update
 - **v1.0.0** - Initial release with basic mounting functionality
 
@@ -153,6 +186,8 @@ sudo mv /tmp/drive-master /usr/local/bin/drive-master
 [4] ⚡ Mount all unmounted drives
 [5] 🚫 Unmount all mounted drives
 [6] 🔄 Update Drive Master
+[7] 💾 Format USB Drive
+[8] 🗑️ Uninstall Drive Master
 [Q] 🚪 Quit
 ```
 

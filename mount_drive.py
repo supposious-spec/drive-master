@@ -5,7 +5,7 @@ import sys
 import time
 import shutil
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 # Colors and styling
 class Colors:
@@ -123,6 +123,7 @@ def main(drive_name, version):
             print_option("4", "⚡", "Mount all unmounted drives", Colors.MAGENTA)
             print_option("5", "🚫", "Unmount all mounted drives", Colors.RED)
             print_option("6", "🔄", "Update Drive Master", Colors.BLUE)
+            print_option("8", "🗑️", "Uninstall Drive Master", Colors.RED)
             print_option("Q", "🚪", "Quit", Colors.RED)
             print_separator()
             
@@ -140,7 +141,10 @@ def main(drive_name, version):
                 unmount_all_mounted(drives)
             elif choice == '6':
                 update_drive_master()
-            elif choice == 'Q':
+            elif choice == '7':
+                format_usb_drive()
+            elif choice == '8':
+                uninstall_drive_master()
                 print(f"\n{Colors.CYAN}{Colors.BOLD}Thanks for using Drive Master! 👋{Colors.END}")
                 sys.exit(0)
             else:
@@ -336,6 +340,172 @@ def mount_drive(uuid, name, dev):
         print_error(f"Mount failed for {name}")
         print(f"{Colors.YELLOW}💡 Suggestion:{Colors.END} Run 'sudo ntfsfix {dev}' to fix filesystem errors")
 
+def get_usb_drives():
+    """Get all USB drives (removable storage)"""
+    usb_drives = {}
+    try:
+        # Get all block devices
+        lsblk_output = subprocess.check_output(['lsblk', '-J', '-o', 'NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE,LABEL,HOTPLUG'], stderr=subprocess.DEVNULL).decode('utf-8')
+        import json
+        data = json.loads(lsblk_output)
+        
+        for device in data['blockdevices']:
+            # Check if it's a removable/hotplug device (USB)
+            if device.get('hotplug') == True or device.get('type') == 'disk':
+                # Check children (partitions)
+                if 'children' in device:
+                    for child in device['children']:
+                        name = child['name']
+                        size = child.get('size', 'Unknown')
+                        fstype = child.get('fstype', 'Unknown')
+                        label = child.get('label', name)
+                        mountpoint = child.get('mountpoint')
+                        
+                        usb_drives[label] = {
+                            'device': f"/dev/{name}",
+                            'size': size,
+                            'fstype': fstype,
+                            'mountpoint': mountpoint,
+                            'parent': f"/dev/{device['name']}"
+                        }
+                else:
+                    # Whole disk without partitions
+                    name = device['name']
+                    size = device.get('size', 'Unknown')
+                    fstype = device.get('fstype', 'Unknown')
+                    label = device.get('label', name)
+                    mountpoint = device.get('mountpoint')
+                    
+                    usb_drives[label] = {
+                        'device': f"/dev/{name}",
+                        'size': size,
+                        'fstype': fstype,
+                        'mountpoint': mountpoint,
+                        'parent': f"/dev/{name}"
+                    }
+    except Exception as e:
+        print_error(f"Failed to detect USB drives: {str(e)}")
+    
+    return usb_drives
+
+def format_usb_drive():
+    """Format USB drives with different filesystems"""
+    print_separator()
+    print(f"{Colors.MAGENTA}{Colors.BOLD}💾 USB DRIVE FORMATTER{Colors.END}")
+    print_separator()
+    
+    print_loading("Scanning for USB drives...")
+    usb_drives = get_usb_drives()
+    
+    if not usb_drives:
+        print_error("No USB drives detected!")
+        return
+    
+    print_success(f"Found {len(usb_drives)} USB drive(s)")
+    print_separator()
+    
+    # List USB drives
+    for i, (label, info) in enumerate(usb_drives.items(), 1):
+        mounted = "✅ Mounted" if info['mountpoint'] else "❌ Not Mounted"
+        print(f"{Colors.CYAN}[{i}]{Colors.END} {Colors.YELLOW}{label}{Colors.END}")
+        print(f"    📱 Device: {info['device']}")
+        print(f"    📏 Size: {info['size']}")
+        print(f"    💾 Format: {info['fstype']}")
+        print(f"    📊 Status: {mounted}")
+        print()
+    
+    try:
+        choice = int(click.prompt(f"{Colors.MAGENTA}Select USB drive to format{Colors.END}", type=int))
+        if 1 <= choice <= len(usb_drives):
+            label = list(usb_drives.keys())[choice - 1]
+            info = usb_drives[label]
+            
+            # Warning
+            print_separator()
+            print(f"{Colors.RED}{Colors.BOLD}⚠️  WARNING: This will ERASE ALL DATA on {label}!{Colors.END}")
+            print(f"{Colors.RED}Device: {info['device']} ({info['size']}){Colors.END}")
+            
+            if not click.confirm(f"{Colors.RED}Are you absolutely sure?{Colors.END}"):
+                print_info("Format cancelled")
+                return
+            
+            # Choose filesystem
+            print_separator()
+            print(f"{Colors.BLUE}{Colors.BOLD}📁 SELECT FILESYSTEM{Colors.END}")
+            print(f"{Colors.CYAN}[1]{Colors.END} FAT32 (Windows/Linux/Mac compatible)")
+            print(f"{Colors.CYAN}[2]{Colors.END} NTFS (Windows/Linux compatible)")
+            print(f"{Colors.CYAN}[3]{Colors.END} EXT4 (Linux only)")
+            
+            fs_choice = int(click.prompt(f"{Colors.BLUE}Select filesystem{Colors.END}", type=int))
+            
+            # Unmount if mounted
+            if info['mountpoint']:
+                print_loading(f"Unmounting {label}...")
+                subprocess.run(['sudo', 'umount', info['device']], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            # Format based on choice
+            if fs_choice == 1:  # FAT32
+                print_loading(f"Formatting {label} as FAT32...")
+                result = subprocess.run(['sudo', 'mkfs.fat', '-F', '32', '-n', label, info['device']], 
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif fs_choice == 2:  # NTFS
+                print_loading(f"Formatting {label} as NTFS...")
+                result = subprocess.run(['sudo', 'mkfs.ntfs', '-f', '-L', label, info['device']], 
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif fs_choice == 3:  # EXT4
+                print_loading(f"Formatting {label} as EXT4...")
+                result = subprocess.run(['sudo', 'mkfs.ext4', '-F', '-L', label, info['device']], 
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                print_error("Invalid filesystem choice!")
+                return
+            
+            if result.returncode == 0:
+                print_success(f"Successfully formatted {label}!")
+                print(f"{Colors.GREEN}🎉 Your USB drive is ready to use{Colors.END}")
+            else:
+                print_error(f"Format failed for {label}")
+                print(f"{Colors.YELLOW}💡 Suggestion:{Colors.END} Check if drive is write-protected")
+        else:
+            print_error("Invalid choice!")
+    except (ValueError, click.Abort):
+        print_error("Invalid input!")
+
+def uninstall_drive_master():
+    """Uninstall Drive Master completely"""
+    print_separator()
+    print(f"{Colors.RED}{Colors.BOLD}🗑️ UNINSTALL DRIVE MASTER{Colors.END}")
+    print_separator()
+    
+    print(f"{Colors.RED}This will completely remove Drive Master from your system.{Colors.END}")
+    
+    if not click.confirm(f"{Colors.RED}Are you sure you want to uninstall?{Colors.END}"):
+        print_info("Uninstall cancelled")
+        return
+    
+    print_loading("Uninstalling Drive Master...")
+    
+    # Remove via pip
+    try:
+        if shutil.which('pip3'):
+            subprocess.run(['pip3', 'uninstall', 'drive-master', '-y'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            subprocess.run(['python3', '-m', 'pip', 'uninstall', 'drive-master', '-y'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except:
+        pass
+    
+    # Remove binaries
+    try:
+        subprocess.run(['sudo', 'rm', '-f', '/usr/local/bin/drive-master'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        os.remove(os.path.expanduser('~/.local/bin/drive-master'))
+    except:
+        pass
+    
+    # Remove from PATH (optional)
+    print_success("Drive Master has been uninstalled!")
+    print(f"{Colors.YELLOW}💡 Note:{Colors.END} You may need to restart your terminal")
+    print(f"{Colors.CYAN}Thanks for using Drive Master! 👋{Colors.END}")
+    
 def update_drive_master():
     """Update Drive Master to latest version"""
     print_separator()
