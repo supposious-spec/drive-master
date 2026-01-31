@@ -13,12 +13,13 @@
 - 📂 **Path Display**: Shows exact mount paths for easy access
 - 📊 **Status Indicators**: Visual status with color-coded drive information
 - 💾 **USB Formatter**: Format USB drives with FAT32/NTFS/EXT4 filesystems
-- 🔄 **Auto-Update**: Built-in update functionality
+- 🔄 **Auto-Update**: Built-in update functionality with version checking
 - 🛡️ **Safe Operations**: Confirmation prompts for destructive actions
 - ⚡ **Direct Mount**: Mount specific drives instantly by name
 - 📂 **Permission Handling**: Automatically sets correct ownership (uid/gid)
 - 🛠️ **Smart Fix**: Suggests fixes if drives fail to mount
 - 🗑️ **Easy Uninstall**: Built-in uninstaller for clean removal
+- 🔍 **Data Recovery**: Professional data recovery using TestDisk/PhotoRec
 
 ---
 
@@ -46,6 +47,41 @@ If you have Python and pip installed:
 ```bash
 pip install git+https://github.com/supposious-spec/drive-master.git
 ```
+
+### 💻 Windows Installation (Experimental)
+**Note**: Drive Master is primarily designed for Linux. Windows support is limited.
+
+**Requirements:**
+- Python 3.7+ installed
+- Git installed
+- Windows Subsystem for Linux (WSL) recommended
+
+**Method 1: Using WSL (Recommended)**
+1. Install WSL2 from Microsoft Store
+2. Open WSL terminal
+3. Run the Linux installation command:
+   ```bash
+   curl -sSL https://raw.githubusercontent.com/supposious-spec/drive-master/main/universal-install.sh | bash
+   ```
+
+**Method 2: Native Windows (Limited)**
+1. Install Python 3.7+ from python.org
+2. Install Git from git-scm.com
+3. Open Command Prompt as Administrator
+4. Clone and install:
+   ```cmd
+   git clone https://github.com/supposious-spec/drive-master.git
+   cd drive-master
+   pip install -r requirements.txt
+   pip install -e .
+   ```
+5. Run with: `python -m mount_drive`
+
+**Windows Limitations:**
+- No sudo support (some features may not work)
+- Limited drive detection capabilities
+- NTFS mounting handled by Windows automatically
+- USB formatting may require administrator privileges
 
 ### 🛠️ Manual Installation
 For developers or custom setups:
@@ -107,7 +143,9 @@ drive-master --version
 Use the built-in update feature from the menu:
 1. Run `drive-master`
 2. Select option `6` (🔄 Update Drive Master)
-3. Restart the application
+3. The tool will check if you have the latest version
+4. If already updated, no restart needed
+5. If updated, restart the application
 
 ### **Manual Update Methods**
 
@@ -160,6 +198,8 @@ rm -rf ~/.local/lib/python*/site-packages/drive_master*
 
 ## 🔢 Version History
 
+- **v2.3.0** - Universal drive support, enhanced USB detection, back options, Ali Hamza credit
+- **v2.2.0** - Advanced USB formatting & data recovery with TestDisk integration
 - **v2.1.0** - USB formatting, built-in uninstaller, enhanced drive management
 - **v2.0.0** - Enhanced UI, unmount functionality, smart drive management, auto-update
 - **v1.0.0** - Initial release with basic mounting functionality

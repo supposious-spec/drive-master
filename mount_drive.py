@@ -933,26 +933,59 @@ def launch_testdisk_gui():
 
         print_error(f"Failed to launch TestDisk: {str(e)}")
 
+def get_latest_version():
+    """Get latest version from GitHub"""
+    try:
+        import urllib.request
+        import json
+        
+        url = "https://api.github.com/repos/supposious-spec/drive-master/releases/latest"
+        with urllib.request.urlopen(url, timeout=5) as response:
+            data = json.loads(response.read().decode())
+            return data.get('tag_name', '').replace('v', '')
+    except:
+        return None
+
 def update_drive_master():
-    """Update Drive Master to latest version"""
+    """Update Drive Master to latest version with version checking"""
     print_separator()
     print(f"{Colors.BLUE}{Colors.BOLD}🔄 UPDATING DRIVE MASTER{Colors.END}")
     print_separator()
     
     print_loading("Checking for updates...")
     
-    # Try pip update first
+    # Get latest version
+    latest_version = get_latest_version()
+    current_version = VERSION
+    
+    if latest_version:
+        if latest_version == current_version:
+            print_success(f"You already have the latest version (v{current_version})!")
+            print_info("No update needed")
+            return
+        else:
+            print_info(f"Current version: v{current_version}")
+            print_info(f"Latest version: v{latest_version}")
+            print_success("Update available!")
+    else:
+        print_warning("Could not check latest version, proceeding with update...")
+    
+    # Try pip update
     try:
         if shutil.which('pip3'):
-            result = subprocess.run(['pip3', 'install', '--user', '--upgrade', '--break-system-packages', 'git+https://github.com/supposious-spec/drive-master.git'], 
+            result = subprocess.run(['pip3', 'install', '--user', '--upgrade', '--force-reinstall', '--no-cache-dir', '--break-system-packages', 'git+https://github.com/supposious-spec/drive-master.git'], 
                                   capture_output=True, text=True)
         else:
-            result = subprocess.run(['python3', '-m', 'pip', 'install', '--user', '--upgrade', '--break-system-packages', 'git+https://github.com/supposious-spec/drive-master.git'], 
+            result = subprocess.run(['python3', '-m', 'pip', 'install', '--user', '--upgrade', '--force-reinstall', '--no-cache-dir', '--break-system-packages', 'git+https://github.com/supposious-spec/drive-master.git'], 
                                   capture_output=True, text=True)
         
         if result.returncode == 0:
             print_success("Drive Master updated successfully!")
-            print_info("Restart the application to use the new version")
+            if latest_version and latest_version != current_version:
+                print_info(f"Updated to version v{latest_version}")
+                print_warning("Please restart Drive Master to use the new version")
+            else:
+                print_info("Installation refreshed")
         else:
             print_error("Update failed via pip")
             print_info("Try running the universal installer again:")
