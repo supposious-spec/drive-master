@@ -16,15 +16,31 @@
 
 ## 📥 Installation
 
-### 🛠️ One-Line Install (System Wide)
-Run the following command in your terminal:
+### 🚀 Universal One-Line Install (Recommended)
+Works on **any Linux distribution** - automatically detects your system and installs:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/supposious-spec/drive-master/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/supposious-spec/drive-master/main/universal-install.sh | bash
 ```
 
-### 🐍 Manual Installation
-If you prefer manual setup:
+### ⚡ Direct Binary Download
+Download pre-built binary (no Python/pip required):
+
+```bash
+wget https://github.com/supposious-spec/drive-master/releases/latest/download/drive-master
+chmod +x drive-master
+sudo mv drive-master /usr/local/bin/
+```
+
+### 🐍 Install via pip
+If you have Python and pip installed:
+
+```bash
+pip install git+https://github.com/supposious-spec/drive-master.git
+```
+
+### 🛠️ Manual Installation
+For developers or custom setups:
 
 1. **Clone the repository**:
    ```bash
