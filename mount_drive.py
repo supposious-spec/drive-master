@@ -5,7 +5,7 @@ import sys
 import time
 import shutil
 
-VERSION = "1.0.0"
+VERSION = "2.0.0"
 
 # Colors and styling
 class Colors:
@@ -16,6 +16,7 @@ class Colors:
     BLUE = '\033[94m'
     MAGENTA = '\033[95m'
     WHITE = '\033[97m'
+    ORANGE = '\033[38;5;208m'
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
     END = '\033[0m'
@@ -118,7 +119,10 @@ def main(drive_name, version):
             print_menu_header()
             print_option("1", "📋", "List all NTFS drives", Colors.GREEN)
             print_option("2", "🔌", "Mount a specific drive", Colors.YELLOW)
-            print_option("3", "⚡", "Mount all NTFS drives", Colors.MAGENTA)
+            print_option("3", "🔓", "Unmount a specific drive", Colors.ORANGE)
+            print_option("4", "⚡", "Mount all unmounted drives", Colors.MAGENTA)
+            print_option("5", "🚫", "Unmount all mounted drives", Colors.RED)
+            print_option("6", "🔄", "Update Drive Master", Colors.BLUE)
             print_option("Q", "🚪", "Quit", Colors.RED)
             print_separator()
             
@@ -127,16 +131,15 @@ def main(drive_name, version):
             if choice == '1':
                 list_drives(drives)
             elif choice == '2':
-                print_separator()
-                name_input = click.prompt(f"{Colors.YELLOW}🔍 Enter drive name (e.g., Coding){Colors.END}", type=str).capitalize()
-                if name_input in drives:
-                    mount_drive(drives[name_input]['uuid'], name_input, drives[name_input]['dev'])
-                else:
-                    print_error(f"Drive '{name_input}' not found. Try option 1 to list.")
+                mount_menu(drives)
             elif choice == '3':
-                print_loading("Mounting all drives...")
-                for name, info in drives.items():
-                    mount_drive(info['uuid'], name, info['dev'])
+                unmount_menu(drives)
+            elif choice == '4':
+                mount_all_unmounted(drives)
+            elif choice == '5':
+                unmount_all_mounted(drives)
+            elif choice == '6':
+                update_drive_master()
             elif choice == 'Q':
                 print(f"\n{Colors.CYAN}{Colors.BOLD}Thanks for using Drive Master! 👋{Colors.END}")
                 sys.exit(0)
@@ -178,18 +181,130 @@ def list_drives(drives):
     user = os.getlogin()
     for i, (name, info) in enumerate(drives.items(), 1):
         mount_point = f"/media/{user}/{name}"
-        is_mounted = subprocess.run(['mountpoint', '-q', mount_point]).returncode == 0
+        mounted = is_mounted(name)
         
-        status_icon = "🟢" if is_mounted else "🔴"
-        status_text = f"{Colors.GREEN}MOUNTED{Colors.END}" if is_mounted else f"{Colors.RED}NOT MOUNTED{Colors.END}"
+        status_icon = "🟢" if mounted else "🔴"
+        status_text = f"{Colors.GREEN}MOUNTED{Colors.END}" if mounted else f"{Colors.RED}NOT MOUNTED{Colors.END}"
         
         print(f"{Colors.CYAN}╭─ Drive #{i}{Colors.END}")
         print(f"{Colors.CYAN}├─{Colors.END} {Colors.YELLOW}{Colors.BOLD}📁 Name:{Colors.END} {name}")
         print(f"{Colors.CYAN}├─{Colors.END} {Colors.BLUE}🆔 UUID:{Colors.END} {info['uuid'][:8]}...")
         print(f"{Colors.CYAN}├─{Colors.END} {Colors.MAGENTA}💾 Device:{Colors.END} {info['dev']}")
+        if mounted:
+            print(f"{Colors.CYAN}├─{Colors.END} {Colors.GREEN}📂 Path:{Colors.END} {mount_point}")
         print(f"{Colors.CYAN}╰─{Colors.END} {Colors.WHITE}📊 Status:{Colors.END} {status_icon} {status_text}")
         print()
 
+def mount_menu(drives):
+    """Interactive mount menu"""
+    unmounted = {name: info for name, info in drives.items() if not is_mounted(name)}
+    
+    if not unmounted:
+        print_info("All drives are already mounted!")
+        return
+        
+    print_separator()
+    print(f"{Colors.YELLOW}{Colors.BOLD}🔌 SELECT DRIVE TO MOUNT{Colors.END}")
+    print_separator()
+    
+    for i, name in enumerate(unmounted.keys(), 1):
+        print(f"{Colors.CYAN}[{i}]{Colors.END} {Colors.WHITE}{name}{Colors.END}")
+    
+    try:
+        choice = int(click.prompt(f"{Colors.YELLOW}Enter drive number{Colors.END}", type=int))
+        if 1 <= choice <= len(unmounted):
+            name = list(unmounted.keys())[choice - 1]
+            info = unmounted[name]
+            mount_drive(info['uuid'], name, info['dev'])
+        else:
+            print_error("Invalid choice!")
+    except (ValueError, click.Abort):
+        print_error("Invalid input!")
+
+def unmount_menu(drives):
+    """Interactive unmount menu"""
+    mounted = {name: info for name, info in drives.items() if is_mounted(name)}
+    
+    if not mounted:
+        print_info("No drives are currently mounted!")
+        return
+        
+    print_separator()
+    print(f"{Colors.ORANGE}{Colors.BOLD}🔓 SELECT DRIVE TO UNMOUNT{Colors.END}")
+    print_separator()
+    
+    for i, name in enumerate(mounted.keys(), 1):
+        user = os.getlogin()
+        mount_point = f"/media/{user}/{name}"
+        print(f"{Colors.CYAN}[{i}]{Colors.END} {Colors.WHITE}{name}{Colors.END} {Colors.BLUE}({mount_point}){Colors.END}")
+    
+    try:
+        choice = int(click.prompt(f"{Colors.ORANGE}Enter drive number{Colors.END}", type=int))
+        if 1 <= choice <= len(mounted):
+            name = list(mounted.keys())[choice - 1]
+            unmount_drive(name)
+        else:
+            print_error("Invalid choice!")
+    except (ValueError, click.Abort):
+        print_error("Invalid input!")
+
+def mount_all_unmounted(drives):
+    """Mount only unmounted drives"""
+    unmounted = {name: info for name, info in drives.items() if not is_mounted(name)}
+    
+    if not unmounted:
+        print_info("All drives are already mounted!")
+        return
+        
+    print_loading(f"Mounting {len(unmounted)} unmounted drives...")
+    for name, info in unmounted.items():
+        mount_drive(info['uuid'], name, info['dev'])
+
+def unmount_all_mounted(drives):
+    """Unmount all mounted drives"""
+    mounted = {name: info for name, info in drives.items() if is_mounted(name)}
+    
+    if not mounted:
+        print_info("No drives are currently mounted!")
+        return
+        
+    confirm = click.confirm(f"{Colors.RED}Unmount all {len(mounted)} mounted drives?{Colors.END}")
+    if confirm:
+        print_loading(f"Unmounting {len(mounted)} drives...")
+        for name in mounted.keys():
+            unmount_drive(name)
+
+def is_mounted(name):
+    """Check if drive is mounted"""
+    user = os.getlogin()
+    mount_point = f"/media/{user}/{name}"
+    return subprocess.run(['mountpoint', '-q', mount_point]).returncode == 0
+
+def unmount_drive(name):
+    """Unmount a drive"""
+    user = os.getlogin()
+    mount_point = f"/media/{user}/{name}"
+    
+    print_separator()
+    print(f"{Colors.ORANGE}{Colors.BOLD}🔓 UNMOUNTING: {name}{Colors.END}")
+    print_separator()
+    
+    if not is_mounted(name):
+        print_info(f"{name} is not mounted")
+        return
+    
+    print_loading(f"Unmounting {name}...")
+    result = subprocess.run(['sudo', 'umount', mount_point], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    
+    if result.returncode == 0:
+        print_success(f"Successfully unmounted {name}")
+        # Remove empty mount point directory
+        try:
+            os.rmdir(mount_point)
+        except OSError:
+            pass  # Directory not empty or doesn't exist
+    else:
+        print_error(f"Failed to unmount {name}")
 def mount_drive(uuid, name, dev):
     """Mount the drive with enhanced UI."""
     user = os.getlogin()
@@ -204,7 +319,7 @@ def mount_drive(uuid, name, dev):
         subprocess.run(['sudo', 'mkdir', '-p', mount_point], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(['sudo', 'chown', f'{user}:{user}', mount_point], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    if subprocess.run(['mountpoint', '-q', mount_point]).returncode == 0:
+    if is_mounted(name):
         print_info(f"{name} is already mounted at {mount_point}")
         return
 
@@ -220,6 +335,34 @@ def mount_drive(uuid, name, dev):
     else:
         print_error(f"Mount failed for {name}")
         print(f"{Colors.YELLOW}💡 Suggestion:{Colors.END} Run 'sudo ntfsfix {dev}' to fix filesystem errors")
+
+def update_drive_master():
+    """Update Drive Master to latest version"""
+    print_separator()
+    print(f"{Colors.BLUE}{Colors.BOLD}🔄 UPDATING DRIVE MASTER{Colors.END}")
+    print_separator()
+    
+    print_loading("Checking for updates...")
+    
+    # Try pip update first
+    try:
+        if shutil.which('pip3'):
+            result = subprocess.run(['pip3', 'install', '--user', '--upgrade', '--break-system-packages', 'git+https://github.com/supposious-spec/drive-master.git'], 
+                                  capture_output=True, text=True)
+        else:
+            result = subprocess.run(['python3', '-m', 'pip', 'install', '--user', '--upgrade', '--break-system-packages', 'git+https://github.com/supposious-spec/drive-master.git'], 
+                                  capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            print_success("Drive Master updated successfully!")
+            print_info("Restart the application to use the new version")
+        else:
+            print_error("Update failed via pip")
+            print_info("Try running the universal installer again:")
+            print(f"{Colors.CYAN}curl -sSL https://raw.githubusercontent.com/supposious-spec/drive-master/main/universal-install.sh | bash{Colors.END}")
+    except Exception as e:
+        print_error(f"Update failed: {str(e)}")
+        print_info("Manual update: Re-run the installer script")
 
 if __name__ == '__main__':
     main()
