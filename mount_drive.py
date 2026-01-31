@@ -41,6 +41,8 @@ def print_banner():
 ║{Colors.YELLOW}{Colors.BOLD}{'Auto-Mount NTFS Drives with Style'.center(width - 2)}{Colors.CYAN}║
 ║{Colors.WHITE}{'v' + VERSION + ' | Professional Linux Drive Manager'.center(width - 2)}{Colors.CYAN}║
 ║{' ' * (width - 2)}║
+║{Colors.GREEN}{Colors.BOLD}{'🚀 Developed by Ali Hamza 🚀'.center(width - 2)}{Colors.CYAN}║
+║{' ' * (width - 2)}║
 ╚{'═' * (width - 2)}╝{Colors.END}
 """
     print(banner)
