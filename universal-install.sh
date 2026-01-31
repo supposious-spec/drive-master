@@ -65,11 +65,13 @@ install_via_pip() {
         install_pip
     fi
     
-    # Install the package with --break-system-packages if needed
+    # Force uninstall any existing version first
     if command_exists pip3; then
-        pip3 install --user --break-system-packages git+${REPO_URL}.git 2>/dev/null || pip3 install --user git+${REPO_URL}.git
+        pip3 uninstall drive-master -y 2>/dev/null || true
+        pip3 install --user --force-reinstall --no-cache-dir --break-system-packages git+${REPO_URL}.git 2>/dev/null || pip3 install --user --force-reinstall --no-cache-dir git+${REPO_URL}.git
     else
-        python3 -m pip install --user --break-system-packages git+${REPO_URL}.git 2>/dev/null || python3 -m pip install --user git+${REPO_URL}.git
+        python3 -m pip uninstall drive-master -y 2>/dev/null || true
+        python3 -m pip install --user --force-reinstall --no-cache-dir --break-system-packages git+${REPO_URL}.git 2>/dev/null || python3 -m pip install --user --force-reinstall --no-cache-dir git+${REPO_URL}.git
     fi
     
     # Add ~/.local/bin to PATH immediately
@@ -121,6 +123,14 @@ main() {
     # Create temp directory
     mkdir -p "$TEMP_DIR"
     
+    # Check if already installed and show version
+    if command_exists drive-master; then
+        echo "🔄 Drive Master is already installed. Checking version..."
+        current_version=$(drive-master --version 2>/dev/null | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' || echo "unknown")
+        echo "📊 Current version: $current_version"
+        echo "🔄 Updating to latest version..."
+    fi
+    
     # Try methods in order of preference
     if install_binary; then
         echo "🎉 Installation complete via binary!"
@@ -147,6 +157,9 @@ main() {
     # Test if command works immediately
     if command_exists drive-master || [ -f "$HOME/.local/bin/drive-master" ]; then
         echo "✅ Command is ready to use!"
+        # Show new version
+        new_version=$(drive-master --version 2>/dev/null | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' || echo "unknown")
+        echo "🎆 Installed version: $new_version"
     else
         echo "💡 Restart terminal or run: export PATH=\"\$HOME/.local/bin:\$PATH\""
     fi
