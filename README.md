@@ -6,20 +6,32 @@
 
 ## ✨ Features
 
-- 🔍 **Auto-Detection**: Automatically finds all NTFS partitions on your system
+- 🔍 **Auto-Detection**: Automatically finds all drives (NTFS/USB/Internal/External)
 - 🎨 **Beautiful UI**: Animated terminal interface with colors and professional styling
 - 🛠️ **Smart Management**: Interactive menus for mounting/unmounting specific drives
 - 🔌 **Selective Operations**: Mount only unmounted drives, unmount only mounted drives
 - 📂 **Path Display**: Shows exact mount paths for easy access
 - 📊 **Status Indicators**: Visual status with color-coded drive information
-- 💾 **USB Formatter**: Format USB drives with FAT32/NTFS/EXT4 filesystems
+- 💾 **Advanced USB Formatter**: Format drives with FAT32/NTFS/EXT4 filesystems
+  - **Quick Format**: GUI-style interactive formatting
+  - **Auto Format**: Background automated formatting using fdisk
 - 🔄 **Auto-Update**: Built-in update functionality with version checking
 - 🛡️ **Safe Operations**: Confirmation prompts for destructive actions
 - ⚡ **Direct Mount**: Mount specific drives instantly by name
 - 📂 **Permission Handling**: Automatically sets correct ownership (uid/gid)
-- 🛠️ **Smart Fix**: Suggests fixes if drives fail to mount
+- 🛠️ **Smart Fix**: Advanced drive repair and formatting options
+  - **Partition Table Creation**: Fix unpartitioned drives
+  - **Force Format**: Repair corrupted drives
+  - **Auto Fix Format**: Automated background drive repair
+  - **Filesystem Repair**: Fix filesystem errors
 - 🗑️ **Easy Uninstall**: Built-in uninstaller for clean removal
 - 🔍 **Data Recovery**: Professional data recovery using TestDisk/PhotoRec
+  - **USB Recovery**: Recover from USB/External drives
+  - **Internal Drive Recovery**: Recover from internal drives
+  - **Directory Recovery**: Recover from specific paths
+  - **Advanced Recovery**: TestDisk GUI interface
+- 🧹 **Interface Control**: Clear screen and refresh options
+- 🌍 **Universal Drive Support**: Works with all drive types and filesystems
 
 ---
 
@@ -114,14 +126,17 @@ Simply run the command to open the beautiful animated menu:
 drive-master
 ```
 **Menu Options:**
-- `1`: 📋 List all detected NTFS drives with status and paths
+- `1`: 📋 List all detected drives (NTFS/USB/Internal) with status and paths
 - `2`: 🔌 Mount a specific drive (interactive selection)
 - `3`: 🔓 Unmount a specific drive (interactive selection)
 - `4`: ⚡ Mount all unmounted drives (smart mounting)
 - `5`: 🚫 Unmount all mounted drives (with confirmation)
 - `6`: 🔄 Update Drive Master to latest version
-- `7`: 💾 Format USB Drive (FAT32/NTFS/EXT4)
-- `8`: 🗑️ Uninstall Drive Master
+- `7`: 💾 Format USB Drive (FAT32/NTFS/EXT4) with Quick/Auto modes
+- `8`: 🔧 Fix Hidden/Problematic Drives with auto format option
+- `9`: 🔍 Recover Data from Drive/USB using TestDisk/PhotoRec
+- `A`: 🗑️ Uninstall Drive Master (built-in uninstaller)
+- `C`: 🧹 Clear Screen (refresh interface)
 - `Q`: 🚪 Exit the tool
 
 ### 2️⃣ Direct Mounting
@@ -198,6 +213,7 @@ rm -rf ~/.local/lib/python*/site-packages/drive_master*
 
 ## 🔢 Version History
 
+- **v3.0.0** - Auto format functionality, enhanced fix options, improved UI alignment, comprehensive drive support
 - **v2.3.0** - Universal drive support, enhanced USB detection, back options, Ali Hamza credit
 - **v2.2.0** - Advanced USB formatting & data recovery with TestDisk integration
 - **v2.1.0** - USB formatting, built-in uninstaller, enhanced drive management
@@ -220,14 +236,17 @@ rm -rf ~/.local/lib/python*/site-packages/drive_master*
 ╭──────────────────────────────────────────────────────────────────────────────╮
 │                           🛠️  DRIVE MASTER CONTROL PANEL  🛠️                            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-[1] 📋 List all NTFS drives
+[1] 📋 List all drives (NTFS/USB/Internal)
 [2] 🔌 Mount a specific drive
 [3] 🔓 Unmount a specific drive  
 [4] ⚡ Mount all unmounted drives
 [5] 🚫 Unmount all mounted drives
 [6] 🔄 Update Drive Master
-[7] 💾 Format USB Drive
-[8] 🗑️ Uninstall Drive Master
+[7] 💾 Format USB Drive (Quick/Auto modes)
+[8] 🔧 Fix Hidden/Problematic Drives
+[9] 🔍 Recover Data from Drive/USB
+[A] 🗑️ Uninstall Drive Master
+[C] 🧹 Clear Screen
 [Q] 🚪 Quit
 ```
 

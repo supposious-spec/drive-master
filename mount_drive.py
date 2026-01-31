@@ -5,7 +5,7 @@ import sys
 import time
 import shutil
 
-VERSION = "3.0.0"
+VERSION = "3.0.1"
 
 # Colors and styling
 class Colors:
@@ -593,14 +593,133 @@ def format_usb_drive():
         if 1 <= choice <= len(all_drives):
             label = list(all_drives.keys())[choice - 1]
             info = all_drives[label]
-            format_drive_enhanced(label, info)
+            
+            # Choose format method
+            print_separator()
+            print(f"{Colors.BLUE}{Colors.BOLD}🔧 FORMAT METHOD{Colors.END}")
+            print(f"{Colors.CYAN}[1]{Colors.END} Quick Format (GUI-style)")
+            print(f"{Colors.CYAN}[2]{Colors.END} Auto Format (Background process)")
+            
+            method = click.prompt(f"{Colors.BLUE}Select method{Colors.END}", type=int)
+            
+            if method == 1:
+                format_drive_enhanced(label, info)
+            elif method == 2:
+                auto_format_usb(label, info)
+            else:
+                print_error("Invalid choice!")
         else:
             print_error("Invalid choice!")
     except (ValueError, click.Abort):
         print_error("Invalid input!")
 
+def auto_format_usb(label, info):
+    """Automated background USB formatting using fdisk + mkfs"""
+    print_separator()
+    print(f"{Colors.MAGENTA}{Colors.BOLD}🚀 AUTO FORMAT: {label}{Colors.END}")
+    print_separator()
+    
+    # Warning
+    print(f"{Colors.RED}{Colors.BOLD}⚠️  WARNING: This will ERASE ALL DATA on {label}!{Colors.END}")
+    print(f"{Colors.RED}Device: {info['device']} ({info['size']}){Colors.END}")
+    
+    if not click.confirm(f"{Colors.RED}Continue with auto format?{Colors.END}"):
+        print_info("Format cancelled")
+        return
+    
+    # Choose filesystem
+    print_separator()
+    print(f"{Colors.BLUE}{Colors.BOLD}📁 SELECT FILESYSTEM{Colors.END}")
+    print(f"{Colors.CYAN}[1]{Colors.END} FAT32 (Universal compatibility)")
+    print(f"{Colors.CYAN}[2]{Colors.END} NTFS (Windows/Linux)")
+    print(f"{Colors.CYAN}[3]{Colors.END} EXT4 (Linux only)")
+    
+    try:
+        fs_choice = int(click.prompt(f"{Colors.BLUE}Select filesystem{Colors.END}", type=int))
+    except (ValueError, click.Abort):
+        print_error("Invalid input!")
+        return
+    
+    # Get device path (use parent device for full format)
+    target_device = info['parent'] if 'parent' in info else info['device']
+    
+    print_loading("Starting automated format process...")
+    
+    try:
+        # Step 1: Unmount any mounted partitions
+        print_loading("Unmounting drive...")
+        subprocess.run(['sudo', 'umount', f"{target_device}*"], 
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # Step 2: Create fdisk commands automatically
+        print_loading("Creating partition table...")
+        
+        fdisk_commands = [
+            'o',      # Create new DOS partition table
+            'n',      # New partition
+            'p',      # Primary
+            '1',      # Partition number 1
+            '',       # First sector (default)
+            '',       # Last sector (default - use full disk)
+            'a',      # Make bootable
+            'w'       # Write and exit
+        ]
+        
+        # Run fdisk with automated commands
+        fdisk_input = '\n'.join(fdisk_commands) + '\n'
+        result = subprocess.run(['sudo', 'fdisk', target_device], 
+                               input=fdisk_input, text=True, 
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        if result.returncode != 0:
+            print_error("Failed to create partition table")
+            return
+        
+        # Wait for system to recognize new partition
+        time.sleep(2)
+        
+        # Step 3: Format the partition
+        partition_device = f"{target_device}1"
+        
+        if fs_choice == 1:  # FAT32
+            print_loading("Formatting as FAT32...")
+            format_cmd = ['sudo', 'mkfs.vfat', '-F', '32', '-n', label[:11], partition_device]
+        elif fs_choice == 2:  # NTFS
+            print_loading("Formatting as NTFS...")
+            format_cmd = ['sudo', 'mkfs.ntfs', '-f', '-L', label, partition_device]
+        elif fs_choice == 3:  # EXT4
+            print_loading("Formatting as EXT4...")
+            format_cmd = ['sudo', 'mkfs.ext4', '-F', '-L', label, partition_device]
+        else:
+            print_error("Invalid filesystem choice!")
+            return
+        
+        result = subprocess.run(format_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        if result.returncode == 0:
+            # Step 4: Sync and finalize
+            print_loading("Finalizing...")
+            subprocess.run(['sudo', 'sync'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            print_success(f"✅ Auto format completed successfully!")
+            print(f"{Colors.GREEN}🎉 {label} is ready to use{Colors.END}")
+            print(f"{Colors.BLUE}📱 Device: {partition_device}{Colors.END}")
+            
+            # Show filesystem info
+            fs_names = {1: 'FAT32', 2: 'NTFS', 3: 'EXT4'}
+            print(f"{Colors.YELLOW}💾 Filesystem: {fs_names[fs_choice]}{Colors.END}")
+            print(f"{Colors.CYAN}🔌 You can safely remove and use the drive{Colors.END}")
+            
+        else:
+            print_error("Format failed")
+            print(f"{Colors.YELLOW}💡 Try manual format or check drive health{Colors.END}")
+            
+    except Exception as e:
+        print_error(f"Auto format failed: {str(e)}")
+        print_info("Try using manual format method instead")
+
 def format_drive_enhanced(label, info):
-    """Enhanced formatting with partition options"""
+    """Enhanced formatting with partition options (GUI-style)"""
     # Warning
     print_separator()
     print(f"{Colors.RED}{Colors.BOLD}⚠️  WARNING: This will ERASE DATA on {label}!{Colors.END}")
@@ -622,7 +741,7 @@ def format_drive_enhanced(label, info):
         
         if scope_choice == 1:
             # Format entire drive
-            target_device = info['parent']
+            target_device = info['parent'] if 'parent' in info else info['device']
             print_warning(f"Will delete ALL partitions on {target_device}")
         elif scope_choice == 2:
             # Format specific partition
@@ -1040,7 +1159,8 @@ def fix_hidden_drives():
         print(f"{Colors.MAGENTA}{Colors.BOLD}🔧 FIX OPTIONS{Colors.END}")
         print(f"{Colors.CYAN}[1]{Colors.END} Create partition table on unpartitioned drive")
         print(f"{Colors.CYAN}[2]{Colors.END} Force format problematic drive")
-        print(f"{Colors.CYAN}[3]{Colors.END} Repair filesystem on drive")
+        print(f"{Colors.CYAN}[3]{Colors.END} Auto format drive (Background process)")
+        print(f"{Colors.CYAN}[4]{Colors.END} Repair filesystem on drive")
         print(f"{Colors.CYAN}[0]{Colors.END} Back to Main Menu")
         
         choice = click.prompt(f"{Colors.ORANGE}Select fix option{Colors.END}", type=str).strip()
@@ -1052,6 +1172,8 @@ def fix_hidden_drives():
         elif choice == '2':
             force_format_drive(drives_found)
         elif choice == '3':
+            auto_fix_format_drive(drives_found)
+        elif choice == '4':
             repair_filesystem(drives_found)
         else:
             print_error("Invalid choice!")
@@ -1156,7 +1278,115 @@ def force_format_drive(drives_found):
     except (ValueError, click.Abort):
         print_error("Invalid input!")
 
-def repair_filesystem(drives_found):
+def auto_fix_format_drive(drives_found):
+    """Auto format problematic drives using fdisk method"""
+    print_separator()
+    print(f"{Colors.MAGENTA}{Colors.BOLD}🚀 AUTO FIX FORMAT{Colors.END}")
+    print_separator()
+    
+    for i, drive in enumerate(drives_found, 1):
+        print(f"{Colors.CYAN}[{i}]{Colors.END} {drive['name']} - {drive['size']} - {drive['model']}")
+    
+    try:
+        choice = int(click.prompt(f"{Colors.MAGENTA}Select drive to auto format{Colors.END}", type=int))
+        if 1 <= choice <= len(drives_found):
+            drive = drives_found[choice - 1]
+            
+            print_warning(f"This will AUTO FORMAT {drive['device']} ({drive['size']})")
+            if click.confirm(f"{Colors.RED}Continue with automated format?{Colors.END}"):
+                # Choose filesystem
+                print(f"{Colors.CYAN}[1]{Colors.END} FAT32 (Universal)")
+                print(f"{Colors.CYAN}[2]{Colors.END} NTFS (Windows/Linux)")
+                print(f"{Colors.CYAN}[3]{Colors.END} EXT4 (Linux only)")
+                
+                fs_choice = int(click.prompt(f"{Colors.BLUE}Select filesystem{Colors.END}", type=int))
+                
+                # Create fake info object for auto_format_usb function
+                fake_info = {
+                    'device': drive['device'],
+                    'parent': drive['device'],
+                    'size': drive['size'],
+                    'model': drive['model'],
+                    'mountpoint': None
+                }
+                
+                # Use the auto format function
+                auto_format_drive_direct(drive['name'], fake_info, fs_choice)
+        else:
+            print_error("Invalid choice!")
+    except (ValueError, click.Abort):
+        print_error("Invalid input!")
+
+def auto_format_drive_direct(label, info, fs_choice):
+    """Direct auto format without user prompts"""
+    target_device = info['device']
+    
+    print_loading("Starting automated fix format...")
+    
+    try:
+        # Unmount any mounted partitions
+        print_loading("Unmounting drive...")
+        subprocess.run(['sudo', 'umount', f"{target_device}*"], 
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # Create fdisk commands automatically
+        print_loading("Creating partition table...")
+        
+        fdisk_commands = [
+            'o',      # Create new DOS partition table
+            'n',      # New partition
+            'p',      # Primary
+            '1',      # Partition number 1
+            '',       # First sector (default)
+            '',       # Last sector (default)
+            'a',      # Make bootable
+            'w'       # Write and exit
+        ]
+        
+        fdisk_input = '\n'.join(fdisk_commands) + '\n'
+        result = subprocess.run(['sudo', 'fdisk', target_device], 
+                               input=fdisk_input, text=True, 
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        if result.returncode != 0:
+            print_error("Failed to create partition table")
+            return
+        
+        time.sleep(2)
+        
+        # Format the partition
+        partition_device = f"{target_device}1"
+        
+        if fs_choice == 1:  # FAT32
+            print_loading("Auto formatting as FAT32...")
+            format_cmd = ['sudo', 'mkfs.vfat', '-F', '32', '-n', label[:11], partition_device]
+        elif fs_choice == 2:  # NTFS
+            print_loading("Auto formatting as NTFS...")
+            format_cmd = ['sudo', 'mkfs.ntfs', '-f', '-L', label, partition_device]
+        elif fs_choice == 3:  # EXT4
+            print_loading("Auto formatting as EXT4...")
+            format_cmd = ['sudo', 'mkfs.ext4', '-F', '-L', label, partition_device]
+        else:
+            print_error("Invalid filesystem choice!")
+            return
+        
+        result = subprocess.run(format_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        if result.returncode == 0:
+            print_loading("Finalizing...")
+            subprocess.run(['sudo', 'sync'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            print_success(f"✅ Auto fix completed successfully!")
+            print(f"{Colors.GREEN}🎉 {label} is now fixed and ready to use{Colors.END}")
+            print(f"{Colors.BLUE}📱 Device: {partition_device}{Colors.END}")
+            
+            fs_names = {1: 'FAT32', 2: 'NTFS', 3: 'EXT4'}
+            print(f"{Colors.YELLOW}💾 Filesystem: {fs_names[fs_choice]}{Colors.END}")
+        else:
+            print_error("Auto format failed")
+            
+    except Exception as e:
+        print_error(f"Auto fix failed: {str(e)}")
     """Repair filesystem on drive"""
     print_separator()
     print(f"{Colors.GREEN}{Colors.BOLD}🔧 REPAIR FILESYSTEM{Colors.END}")
