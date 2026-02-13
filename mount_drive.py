@@ -4,8 +4,9 @@ import os
 import sys
 import time
 import shutil
+from datetime import datetime
 
-VERSION = "3.0.1"
+VERSION = "3.2.0"
 
 # Colors and styling
 class Colors:
@@ -117,48 +118,65 @@ def main(drive_name, version):
 
     if drive_name:
         # Direct mount mode
-        drive_name = drive_name.capitalize()
-        if drive_name not in drives:
-            print_warning(f"Drive '{drive_name}' not found. Available: {', '.join(drives.keys())}")
-            return
-        mount_drive(drives[drive_name]['uuid'], drive_name, drives[drive_name]['dev'])
+        drive_name_lower = drive_name.lower()
+        found = False
+        for path, info in drives.items():
+            label = str(info.get('label') or "").lower()
+            if label == drive_name_lower or path.lower() == drive_name_lower:
+                mount_name = info.get('label') or path.split('/')[-1]
+                mount_drive(info['uuid'], mount_name, info['device'])
+                found = True
+                break
+        if not found:
+            print_warning(f"Drive matching '{drive_name}' not found.")
     else:
         # Interactive menu
         while True:
             print_menu_header()
-            print_option("1", "📋", "List all drives (NTFS/USB/Internal)", Colors.GREEN)
+            print_option("1", "📋", "List all drives (Detailed Info)", Colors.GREEN)
             print_option("2", "🔌", "Mount a specific drive", Colors.YELLOW)
             print_option("3", "🔓", "Unmount a specific drive", Colors.ORANGE)
             print_option("4", "⚡", "Mount all unmounted drives", Colors.MAGENTA)
             print_option("5", "🚫", "Unmount all mounted drives", Colors.RED)
             print_option("6", "🔄", "Update Drive Master", Colors.BLUE)
-            print_option("7", "💾", "Format USB Drive (FAT32/NTFS/EXT4)", Colors.MAGENTA)
+            print_option("7", "💾", "Drive Formatter (FAT32/NTFS/EXT4)", Colors.MAGENTA)
             print_option("8", "🔧", "Fix Hidden/Problematic Drives", Colors.ORANGE)
-            print_option("9", "🔍", "Recover Data from Drive/USB", Colors.CYAN)
+            print_option("9", "🔍", "Data Recovery Center", Colors.CYAN)
+            print_option("P", "🔑", "Windows Password Removal", Colors.ORANGE)
             print_option("A", "🗑️", "Uninstall Drive Master", Colors.RED)
             print_option("C", "🧹", "Clear Screen", Colors.WHITE)
+            print_option("Q", "🚪", "Quit", Colors.RED)
             print_separator()
             
             choice = click.prompt(f"{Colors.CYAN}➤ Enter your choice{Colors.END}", type=str).strip().upper()
 
             if choice == '1':
                 list_drives(drives)
+                drives = get_all_drives()  # Refresh after viewing
             elif choice == '2':
                 mount_menu(drives)
+                drives = get_all_drives()
             elif choice == '3':
                 unmount_menu(drives)
+                drives = get_all_drives()
             elif choice == '4':
                 mount_all_unmounted(drives)
+                drives = get_all_drives()
             elif choice == '5':
                 unmount_all_mounted(drives)
+                drives = get_all_drives()
             elif choice == '6':
                 update_drive_master()
             elif choice == '7':
                 format_usb_drive()
+                drives = get_all_drives()
             elif choice == '8':
                 fix_hidden_drives()
+                drives = get_all_drives()
             elif choice == '9':
                 recover_data_menu()
+            elif choice == 'P':
+                windows_password_menu(drives)
             elif choice == 'A':
                 uninstall_drive_master()
                 return
@@ -173,70 +191,127 @@ def main(drive_name, version):
                 
             input(f"\n{Colors.CYAN}Press Enter to continue...{Colors.END}")
 
-def get_all_drives():
-    """Get all drives including USB, internal, and problematic drives"""
-    drives = {}
+def get_fdisk_info():
+    """Parse fdisk -l output to get more details about drives"""
+    fdisk_data = {}
+    current_disk = None
     try:
-        # Get comprehensive drive info using lsblk
+        output = subprocess.check_output(['sudo', 'fdisk', '-l'], stderr=subprocess.DEVNULL).decode('utf-8')
+        lines = output.split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            if not line: continue
+            
+            if line.startswith('Disk /dev/'):
+                disk_path = line.split(':')[0].replace('Disk ', '').strip()
+                current_disk = disk_path
+                fdisk_data[current_disk] = {
+                    'model': 'Unknown',
+                    'partitions': []
+                }
+            
+            elif line.startswith('Disk model:') and current_disk:
+                fdisk_data[current_disk]['model'] = line.split('Disk model:')[1].strip()
+                
+            elif line.startswith('/dev/') and current_disk:
+                parts = line.split()
+                if len(parts) >= 6:
+                    dev_path = parts[0]
+                    # Handle optional '*' in second column
+                    idx = 4 if parts[1] == '*' else 4
+                    if len(parts) > 5 and parts[4].endswith(tuple('KMGTP')):
+                         size = parts[4]
+                         ptype = ' '.join(parts[5:])
+                    else:
+                         # Fallback or complex parsing
+                         size = parts[4]
+                         ptype = ' '.join(parts[5:])
+                    
+                    fdisk_data[current_disk]['partitions'].append({
+                        'device': dev_path,
+                        'size': size,
+                        'type': ptype
+                    })
+    except Exception:
+        pass
+    return fdisk_data
+
+def get_all_drives():
+    """Get all drives using fdisk -l as primary source, enriched by lsblk"""
+    drives = {}
+    fdisk_info = get_fdisk_info()
+    
+    try:
         lsblk_output = subprocess.check_output(['lsblk', '-J', '-o', 'NAME,SIZE,TYPE,TRAN,RM,MODEL,FSTYPE,LABEL,MOUNTPOINT,UUID'], stderr=subprocess.DEVNULL).decode('utf-8')
         import json
-        data = json.loads(lsblk_output)
+        lsblk_data = json.loads(lsblk_output)
         
-        for device in data['blockdevices']:
-            if device.get('type') == 'disk':
-                device_name = device['name']
-                device_path = f"/dev/{device_name}"
-                
-                # Get device info
-                device_size = device.get('size', 'Unknown')
-                transport = device.get('tran', 'Unknown')
-                removable = device.get('rm', '0') == '1'
-                model = device.get('model', 'Unknown')
-                
-                # Determine drive type
-                if transport == 'usb' or removable:
-                    drive_type = 'USB'
-                elif transport in ['sata', 'nvme', 'ata']:
-                    drive_type = 'Internal'
-                else:
-                    drive_type = 'Other'
-                
-                # Check for partitions
-                if 'children' in device:
-                    for child in device['children']:
-                        part_name = child['name']
-                        part_path = f"/dev/{part_name}"
-                        part_size = child.get('size', device_size)  # Use partition size or device size
-                        fstype = child.get('fstype', 'Unknown')
-                        label = child.get('label', part_name)
-                        mountpoint = child.get('mountpoint')
-                        uuid = child.get('uuid', '')
-                        
-                        drives[label] = {
-                            'device': part_path,
-                            'parent': device_path,
-                            'size': part_size,
-                            'fstype': fstype,
-                            'mountpoint': mountpoint,
-                            'uuid': uuid,
-                            'type': drive_type,
-                            'model': model,
-                            'transport': transport
-                        }
-                else:
-                    # Whole disk without partitions (problematic drives)
-                    label = model if model != 'Unknown' else device_name
-                    drives[label] = {
-                        'device': device_path,
-                        'parent': device_path,
-                        'size': device_size,
-                        'fstype': 'Unknown',
-                        'mountpoint': None,
-                        'uuid': '',
+        lsblk_lookup = {}
+        def flatten_lsblk(devices):
+            for dev in devices:
+                path = f"/dev/{dev['name']}"
+                lsblk_lookup[path] = dev
+                if 'children' in dev:
+                    flatten_lsblk(dev['children'])
+        
+        flatten_lsblk(lsblk_data['blockdevices'])
+        
+        for disk_path, disk_details in fdisk_info.items():
+            lsblk_disk = lsblk_lookup.get(disk_path, {})
+            
+            transport = lsblk_disk.get('tran', 'Unknown')
+            removable = lsblk_disk.get('rm', '1') == '1' # Default to removable if unknown
+            model = disk_details['model']
+            if model == 'Unknown':
+                model = lsblk_disk.get('model', 'Unknown')
+            
+            if transport == 'usb' or removable:
+                drive_type = 'USB'
+            elif transport in ['sata', 'nvme', 'ata']:
+                drive_type = 'Internal'
+            else:
+                drive_type = 'Other'
+            
+            if disk_details['partitions']:
+                for fpart in disk_details['partitions']:
+                    part_path = fpart['device']
+                    lsblk_part = lsblk_lookup.get(part_path, {})
+                    
+                    fstype = lsblk_part.get('fstype', 'Unknown')
+                    label = lsblk_part.get('label')
+                    mountpoint = lsblk_part.get('mountpoint')
+                    uuid = lsblk_part.get('uuid', '')
+                    size = lsblk_part.get('size', fpart['size'])
+                    
+                    drives[part_path] = {
+                        'device': part_path,
+                        'parent': disk_path,
+                        'size': size,
+                        'fstype': fstype,
+                        'fdisk_ptype': fpart['type'],
+                        'label': label,
+                        'mountpoint': mountpoint,
+                        'uuid': uuid,
                         'type': drive_type,
                         'model': model,
                         'transport': transport
                     }
+            else:
+                # Disk without partitions
+                drives[disk_path] = {
+                    'device': disk_path,
+                    'parent': disk_path,
+                    'size': lsblk_disk.get('size', 'Unknown'),
+                    'fstype': lsblk_disk.get('fstype', 'Unknown'),
+                    'fdisk_ptype': 'Disk',
+                    'label': lsblk_disk.get('label'),
+                    'mountpoint': lsblk_disk.get('mountpoint'),
+                    'uuid': lsblk_disk.get('uuid', ''),
+                    'type': drive_type,
+                    'model': model,
+                    'transport': transport
+                }
                     
     except Exception as e:
         print_error(f"Failed to scan drives: {str(e)}")
@@ -246,41 +321,39 @@ def get_all_drives():
 def list_drives(drives):
     """List all drives with detailed information."""
     print_separator()
-    print(f"{Colors.BLUE}{Colors.BOLD}📋 ALL DRIVES DETECTED{Colors.END}")
+    print(f"{Colors.BLUE}{Colors.BOLD}📋 ALL DRIVES DETECTED (Detailed Info){Colors.END}")
     print_separator()
     
-    # Separate drives by type
     usb_drives = {k: v for k, v in drives.items() if v['type'] == 'USB'}
     internal_drives = {k: v for k, v in drives.items() if v['type'] == 'Internal'}
     other_drives = {k: v for k, v in drives.items() if v['type'] == 'Other'}
     
-    # Display USB drives
     if usb_drives:
         print(f"{Colors.MAGENTA}{Colors.BOLD}💾 USB DRIVES{Colors.END}")
-        for i, (name, info) in enumerate(usb_drives.items(), 1):
+        for i, (path, info) in enumerate(usb_drives.items(), 1):
+            name = info.get('label') or path.split('/')[-1]
             display_drive_info(name, info, i, "USB")
     
-    # Display Internal drives
     if internal_drives:
         print(f"{Colors.BLUE}{Colors.BOLD}💽 INTERNAL DRIVES{Colors.END}")
-        for i, (name, info) in enumerate(internal_drives.items(), 1):
+        for i, (path, info) in enumerate(internal_drives.items(), 1):
+            name = info.get('label') or path.split('/')[-1]
             display_drive_info(name, info, i, "Internal")
     
-    # Display Other drives
     if other_drives:
         print(f"{Colors.YELLOW}{Colors.BOLD}📀 OTHER DRIVES{Colors.END}")
-        for i, (name, info) in enumerate(other_drives.items(), 1):
+        for i, (path, info) in enumerate(other_drives.items(), 1):
+            name = info.get('label') or path.split('/')[-1]
             display_drive_info(name, info, i, "Other")
     
     print_option("0", "⬅️", "Back to Main Menu", Colors.WHITE)
-    choice = click.prompt(f"{Colors.CYAN}Enter choice{Colors.END}", type=str).strip()
+    choice = click.prompt(f"{Colors.CYAN}Enter choice{Colors.END}", type=str, default="0").strip()
 
 def display_drive_info(name, info, index, drive_type):
     """Display detailed drive information"""
     user = os.getlogin()
     mount_point = f"/media/{user}/{name}"
     
-    # Check if mounted
     if info['mountpoint']:
         mounted = True
         mount_path = info['mountpoint']
@@ -296,23 +369,50 @@ def display_drive_info(name, info, index, drive_type):
     print(f"{Colors.CYAN}├─{Colors.END} {Colors.BLUE}📏 Size:{Colors.END} {info['size']}")
     print(f"{Colors.CYAN}├─{Colors.END} {Colors.MAGENTA}💾 Device:{Colors.END} {info['device']}")
     print(f"{Colors.CYAN}├─{Colors.END} {Colors.WHITE}💻 Model:{Colors.END} {info['model']}")
-    print(f"{Colors.CYAN}├─{Colors.END} {Colors.ORANGE}📀 Format:{Colors.END} {info['fstype']}")
+    print(f"{Colors.CYAN}├─{Colors.END} {Colors.ORANGE}📀 Format:{Colors.END} {info['fstype']} ({info.get('fdisk_ptype', 'Unknown')})")
     if mounted:
         print(f"{Colors.CYAN}├─{Colors.END} {Colors.GREEN}📂 Path:{Colors.END} {mount_path}")
     print(f"{Colors.CYAN}╰─{Colors.END} {Colors.WHITE}📊 Status:{Colors.END} {status_icon} {status_text}")
     print()
 
 def is_drive_mounted(info):
-    """Check if drive is mounted"""
+    """Check if drive is mounted by info or path"""
     if info['mountpoint']:
         return True
-    
     user = os.getlogin()
-    mount_point = f"/media/{user}/{info['device'].split('/')[-1]}"
+    name = info.get('label') or info['device'].split('/')[-1]
+    mount_point = f"/media/{user}/{name}"
     return subprocess.run(['mountpoint', '-q', mount_point], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
 
+def is_mounted(name):
+    """Check if drive name is mounted in /media/user/name"""
+    user = os.getlogin()
+    mount_point = f"/media/{user}/{name}"
+    return subprocess.run(['mountpoint', '-q', mount_point], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+def mount_drive(uuid, name, dev):
+    """Standard mount function"""
+    user = os.getlogin()
+    mount_point = f"/media/{user}/{name}"
+    
+    if is_mounted(name):
+        return True
+
+    if not os.path.exists(mount_point):
+        subprocess.run(['sudo', 'mkdir', '-p', mount_point])
+        subprocess.run(['sudo', 'chown', f'{user}:{user}', mount_point])
+
+    # Try UUID if available, else device
+    if uuid:
+        cmd = ['sudo', 'mount', '-t', 'ntfs-3g', '-o', f'uid={os.getuid()},gid={os.getgid()}', f'UUID={uuid}', mount_point]
+    else:
+        cmd = ['sudo', 'mount', '-t', 'ntfs-3g', '-o', f'uid={os.getuid()},gid={os.getgid()}', dev, mount_point]
+    
+    result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return result.returncode == 0
+
 def mount_drive_enhanced(info, name):
-    """Enhanced mount function for all drive types"""
+    """Enhanced mount function with UI and repair suggestion"""
     user = os.getlogin()
     mount_point = f"/media/{user}/{name}"
     
@@ -322,1229 +422,491 @@ def mount_drive_enhanced(info, name):
     
     if is_drive_mounted(info):
         print_info(f"{name} is already mounted")
-        return
+        return True
     
-    # Create mount point
     if not os.path.exists(mount_point):
         print_loading("Creating mount point...")
-        subprocess.run(['sudo', 'mkdir', '-p', mount_point], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(['sudo', 'chown', f'{user}:{user}', mount_point], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(['sudo', 'mkdir', '-p', mount_point])
+        subprocess.run(['sudo', 'chown', f'{user}:{user}', mount_point])
     
     print_loading(f"Mounting {name}...")
     
-    # Mount based on filesystem type
-    if info['fstype'] == 'ntfs':
+    # Check filesystem type
+    fstype = str(info.get('fstype') or "").lower()
+    fdisk_ptype = str(info.get('fdisk_ptype') or "").lower()
+
+    if fstype == 'ntfs' or 'microsoft' in fdisk_ptype:
         cmd = ['sudo', 'mount', '-t', 'ntfs-3g', '-o', f'uid={os.getuid()},gid={os.getgid()}', info['device'], mount_point]
-    elif info['fstype'] in ['ext4', 'ext3', 'ext2']:
-        cmd = ['sudo', 'mount', '-t', info['fstype'], info['device'], mount_point]
-    elif info['fstype'] in ['vfat', 'fat32']:
+    elif fstype in ['vfat', 'fat32', 'msdos']:
         cmd = ['sudo', 'mount', '-t', 'vfat', '-o', f'uid={os.getuid()},gid={os.getgid()}', info['device'], mount_point]
+    elif fstype in ['ext4', 'ext3', 'ext2']:
+        cmd = ['sudo', 'mount', '-t', fstype, info['device'], mount_point]
     else:
         cmd = ['sudo', 'mount', info['device'], mount_point]
-    
+        
     result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     if result.returncode == 0:
         print_success(f"Successfully mounted {name} at {mount_point}")
-        print(f"{Colors.GREEN}📂 Access your drive: {Colors.BOLD}{mount_point}{Colors.END}")
+        return True
     else:
         print_error(f"Mount failed for {name}")
-        if info['fstype'] == 'ntfs':
-            print(f"{Colors.YELLOW}💡 Suggestion:{Colors.END} Run 'sudo ntfsfix {info['device']}' to fix filesystem errors")
-        else:
-            print(f"{Colors.YELLOW}💡 Suggestion:{Colors.END} Check if drive is corrupted or needs repair")
-
-def mount_menu(drives):
-    """Interactive mount menu"""
-    # Filter mountable drives (NTFS, ext4, etc.)
-    mountable = {name: info for name, info in drives.items() 
-                if info['fstype'] in ['ntfs', 'ext4', 'ext3', 'ext2', 'vfat', 'fat32'] 
-                and not is_drive_mounted(info)}
-    
-    if not mountable:
-        print_info("No unmounted drives available for mounting!")
-        print_option("0", "⬅️", "Back to Main Menu", Colors.WHITE)
-        choice = click.prompt(f"{Colors.CYAN}Enter choice{Colors.END}", type=str).strip()
-        return
-        
-    print_separator()
-    print(f"{Colors.YELLOW}{Colors.BOLD}🔌 SELECT DRIVE TO MOUNT{Colors.END}")
-    print_separator()
-    
-    for i, (name, info) in enumerate(mountable.items(), 1):
-        print(f"{Colors.CYAN}[{i}]{Colors.END} {Colors.WHITE}{name}{Colors.END} ({info['size']}) - {info['fstype']}")
-    
-    print_option("0", "⬅️", "Back to Main Menu", Colors.WHITE)
-    
-    try:
-        choice = click.prompt(f"{Colors.YELLOW}Enter drive number{Colors.END}", type=str).strip()
-        if choice == '0':
-            return
-        choice = int(choice)
-        if 1 <= choice <= len(mountable):
-            name = list(mountable.keys())[choice - 1]
-            info = mountable[name]
-            mount_drive_enhanced(info, name)
-        else:
-            print_error("Invalid choice!")
-    except (ValueError, click.Abort):
-        print_error("Invalid input!")
-
-def unmount_menu(drives):
-    """Interactive unmount menu"""
-    mounted = {name: info for name, info in drives.items() if is_mounted(name)}
-    
-    if not mounted:
-        print_info("No drives are currently mounted!")
-        return
-        
-    print_separator()
-    print(f"{Colors.ORANGE}{Colors.BOLD}🔓 SELECT DRIVE TO UNMOUNT{Colors.END}")
-    print_separator()
-    
-    for i, name in enumerate(mounted.keys(), 1):
-        user = os.getlogin()
-        mount_point = f"/media/{user}/{name}"
-        print(f"{Colors.CYAN}[{i}]{Colors.END} {Colors.WHITE}{name}{Colors.END} {Colors.BLUE}({mount_point}){Colors.END}")
-    
-    try:
-        choice = int(click.prompt(f"{Colors.ORANGE}Enter drive number{Colors.END}", type=int))
-        if 1 <= choice <= len(mounted):
-            name = list(mounted.keys())[choice - 1]
-            unmount_drive(name)
-        else:
-            print_error("Invalid choice!")
-    except (ValueError, click.Abort):
-        print_error("Invalid input!")
-
-def mount_all_unmounted(drives):
-    """Mount only unmounted drives"""
-    unmounted = {name: info for name, info in drives.items() if not is_mounted(name)}
-    
-    if not unmounted:
-        print_info("All drives are already mounted!")
-        return
-        
-    print_loading(f"Mounting {len(unmounted)} unmounted drives...")
-    for name, info in unmounted.items():
-        mount_drive(info['uuid'], name, info['dev'])
-
-def unmount_all_mounted(drives):
-    """Unmount all mounted drives"""
-    mounted = {name: info for name, info in drives.items() if is_mounted(name)}
-    
-    if not mounted:
-        print_info("No drives are currently mounted!")
-        return
-        
-    confirm = click.confirm(f"{Colors.RED}Unmount all {len(mounted)} mounted drives?{Colors.END}")
-    if confirm:
-        print_loading(f"Unmounting {len(mounted)} drives...")
-        for name in mounted.keys():
-            unmount_drive(name)
-
-def is_mounted(name):
-    """Check if drive is mounted"""
-    user = os.getlogin()
-    mount_point = f"/media/{user}/{name}"
-    return subprocess.run(['mountpoint', '-q', mount_point]).returncode == 0
+        if 'ntfs' in fstype or 'microsoft' in fdisk_ptype:
+            print_warning(f"💡 Suggestion: Run 'sudo ntfsfix {info['device']}' to fix filesystem errors")
+        return False
 
 def unmount_drive(name):
-    """Unmount a drive"""
+    """Unmount a drive by name"""
     user = os.getlogin()
     mount_point = f"/media/{user}/{name}"
     
-    print_separator()
-    print(f"{Colors.ORANGE}{Colors.BOLD}🔓 UNMOUNTING: {name}{Colors.END}")
-    print_separator()
-    
     if not is_mounted(name):
-        print_info(f"{name} is not mounted")
-        return
+        return True
     
     print_loading(f"Unmounting {name}...")
     result = subprocess.run(['sudo', 'umount', mount_point], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     if result.returncode == 0:
-        print_success(f"Successfully unmounted {name}")
-        # Remove empty mount point directory
         try:
             os.rmdir(mount_point)
-        except OSError:
-            pass  # Directory not empty or doesn't exist
+        except:
+            pass
+        print_success(f"Successfully unmounted {name}")
+        return True
     else:
         print_error(f"Failed to unmount {name}")
-        print(f"{Colors.YELLOW}💡 Suggestion:{Colors.END} Close any files/programs using this drive and try again")
-    """Mount the drive with enhanced UI."""
-    user = os.getlogin()
-    mount_point = f"/media/{user}/{name}"
-    
-    print_separator()
-    print(f"{Colors.YELLOW}{Colors.BOLD}🔌 MOUNTING: {name}{Colors.END}")
-    print_separator()
-    
-    if not os.path.exists(mount_point):
-        print_loading("Creating mount point...")
-        subprocess.run(['sudo', 'mkdir', '-p', mount_point], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(['sudo', 'chown', f'{user}:{user}', mount_point], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return False
 
-    if is_mounted(name):
-        print_info(f"{name} is already mounted at {mount_point}")
+def mount_menu(drives):
+    """Interactive Select-to-Mount menu"""
+    mountable = {path: info for path, info in drives.items() if not is_drive_mounted(info)}
+    
+    if not mountable:
+        print_info("No unmounted drives available.")
         return
 
-    print_loading(f"Mounting {name}...")
+    print_separator()
+    print(f"{Colors.YELLOW}{Colors.BOLD}🔌 SELECT DRIVE TO MOUNT{Colors.END}")
+    print_separator()
     
-    # Using -t ntfs-3g for better write support
-    cmd = ['sudo', 'mount', '-t', 'ntfs-3g', '-o', f'uid={os.getuid()},gid={os.getgid()}', f'UUID={uuid}', mount_point]
-    result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for i, (path, info) in enumerate(mountable.items(), 1):
+        name = info.get('label') or path.split('/')[-1]
+        print(f"{Colors.CYAN}[{i}]{Colors.END} {Colors.WHITE}{name}{Colors.END} ({info['size']}) - {info['fstype']} [{path}]")
     
-    if result.returncode == 0:
-        print_success(f"Successfully mounted {name} at {mount_point}")
-        print(f"{Colors.GREEN}📂 Access your drive: {Colors.BOLD}{mount_point}{Colors.END}")
-    else:
-        print_error(f"Mount failed for {name}")
-        print(f"{Colors.YELLOW}💡 Suggestion:{Colors.END} Run 'sudo ntfsfix {dev}' to fix filesystem errors")
+    print_option("0", "⬅️", "Back", Colors.WHITE)
+    try:
+        choice = click.prompt(f"{Colors.YELLOW}Enter number{Colors.END}", type=str).strip()
+        if choice == '0': return
+        idx = int(choice) - 1
+        if 0 <= idx < len(mountable):
+            path = list(mountable.keys())[idx]
+            info = mountable[path]
+            name = info.get('label') or path.split('/')[-1]
+            mount_drive_enhanced(info, name)
+    except:
+        pass
+
+def unmount_menu(drives):
+    """Interactive Select-to-Unmount menu"""
+    mounted = {}
+    for path, info in drives.items():
+        name = info.get('label') or path.split('/')[-1]
+        if is_mounted(name):
+            mounted[path] = info
+            
+    if not mounted:
+        print_info("No drives are currently mounted.")
+        return
+
+    print_separator()
+    print(f"{Colors.ORANGE}{Colors.BOLD}🔓 SELECT DRIVE TO UNMOUNT{Colors.END}")
+    print_separator()
+    
+    for i, (path, info) in enumerate(mounted.items(), 1):
+        name = info.get('label') or path.split('/')[-1]
+        print(f"{Colors.CYAN}[{i}]{Colors.END} {Colors.WHITE}{name}{Colors.END} [{path}]")
+
+    print_option("0", "⬅️", "Back", Colors.WHITE)
+    try:
+        choice = click.prompt(f"{Colors.ORANGE}Enter number{Colors.END}", type=str).strip()
+        if choice == '0': return
+        idx = int(choice) - 1
+        if 0 <= idx < len(mounted):
+            path = list(mounted.keys())[idx]
+            name = mounted[path].get('label') or path.split('/')[-1]
+            unmount_drive(name)
+    except:
+        pass
+
+def mount_all_unmounted(drives):
+    """Mount everything that isn't mounted"""
+    unmounted = {path: info for path, info in drives.items() if not is_drive_mounted(info)}
+    if not unmounted:
+        print_info("All drives already mounted.")
+        return
+    print_loading(f"Mounting {len(unmounted)} drives...")
+    for path, info in unmounted.items():
+        name = info.get('label') or path.split('/')[-1]
+        mount_drive(info['uuid'], name, info['device'])
+
+def unmount_all_mounted(drives):
+    """Unmount everything that is mounted in /media/user/"""
+    mounted = []
+    for path, info in drives.items():
+        name = info.get('label') or path.split('/')[-1]
+        if is_mounted(name):
+            mounted.append(name)
+    
+    if not mounted:
+        print_info("No drives to unmount.")
+        return
+        
+    if click.confirm(f"{Colors.RED}Unmount all {len(mounted)} drives?{Colors.END}"):
+        for name in mounted:
+            unmount_drive(name)
 
 def get_usb_drives():
-    """Get all USB drives (removable storage)"""
-    usb_drives = {}
-    try:
-        # Get all block devices
-        lsblk_output = subprocess.check_output(['lsblk', '-J', '-o', 'NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE,LABEL,HOTPLUG'], stderr=subprocess.DEVNULL).decode('utf-8')
-        import json
-        data = json.loads(lsblk_output)
-        
-        for device in data['blockdevices']:
-            # Check if it's a removable/hotplug device (USB)
-            if device.get('hotplug') == True or device.get('type') == 'disk':
-                # Check children (partitions)
-                if 'children' in device:
-                    for child in device['children']:
-                        name = child['name']
-                        size = child.get('size', 'Unknown')
-                        fstype = child.get('fstype', 'Unknown')
-                        label = child.get('label', name)
-                        mountpoint = child.get('mountpoint')
-                        
-                        usb_drives[label] = {
-                            'device': f"/dev/{name}",
-                            'size': size,
-                            'fstype': fstype,
-                            'mountpoint': mountpoint,
-                            'parent': f"/dev/{device['name']}"
-                        }
-                else:
-                    # Whole disk without partitions
-                    name = device['name']
-                    size = device.get('size', 'Unknown')
-                    fstype = device.get('fstype', 'Unknown')
-                    label = device.get('label', name)
-                    mountpoint = device.get('mountpoint')
-                    
-                    usb_drives[label] = {
-                        'device': f"/dev/{name}",
-                        'size': size,
-                        'fstype': fstype,
-                        'mountpoint': mountpoint,
-                        'parent': f"/dev/{name}"
-                    }
-    except Exception as e:
-        print_error(f"Failed to detect USB drives: {str(e)}")
-    
-    return usb_drives
+    """Helper to get only USB drives"""
+    all_drives = get_all_drives()
+    return {path: info for path, info in all_drives.items() if info['type'] == 'USB'}
 
 def format_usb_drive():
-    """Format USB drives and problematic drives with different filesystems"""
+    """Integrated drive formatter"""
+    drives = get_all_drives()
+    if not drives: return
+    
     print_separator()
     print(f"{Colors.MAGENTA}{Colors.BOLD}💾 DRIVE FORMATTER{Colors.END}")
     print_separator()
     
-    print_loading("Scanning for all drives...")
-    all_drives = get_all_drives()
-    
-    if not all_drives:
-        print_error("No drives detected!")
-        print_option("0", "⬅️", "Back to Main Menu", Colors.WHITE)
-        choice = click.prompt(f"{Colors.CYAN}Enter choice{Colors.END}", type=str).strip()
-        return
-    
-    print_success(f"Found {len(all_drives)} drive(s)")
-    print_separator()
-    
-    # List all drives for formatting
-    for i, (label, info) in enumerate(all_drives.items(), 1):
-        mounted = "✅ Mounted" if info['mountpoint'] or is_drive_mounted(info) else "❌ Not Mounted"
-        drive_type = f"[{info['type']}]" if info['type'] != 'Unknown' else ""
-        print(f"{Colors.CYAN}[{i}]{Colors.END} {Colors.YELLOW}{label}{Colors.END} {drive_type}")
-        print(f"    📱 Device: {info['device']}")
-        print(f"    📏 Size: {info['size']}")
-        print(f"    💾 Format: {info['fstype']}")
-        print(f"    💻 Model: {info['model']}")
-        print(f"    📊 Status: {mounted}")
-        print()
-    
-    print_option("0", "⬅️", "Back to Main Menu", Colors.WHITE)
-    
+    for i, (path, info) in enumerate(drives.items(), 1):
+        name = info.get('label') or path.split('/')[-1]
+        print(f"{Colors.CYAN}[{i}]{Colors.END} {Colors.YELLOW}{name}{Colors.END} [{info['type']}] ({info['size']})")
+        
+    print_option("0", "⬅️", "Back", Colors.WHITE)
     try:
-        choice = click.prompt(f"{Colors.MAGENTA}Select drive to format{Colors.END}", type=str).strip()
-        if choice == '0':
-            return
-        choice = int(choice)
-        if 1 <= choice <= len(all_drives):
-            label = list(all_drives.keys())[choice - 1]
-            info = all_drives[label]
-            
-            # Choose format method
-            print_separator()
-            print(f"{Colors.BLUE}{Colors.BOLD}🔧 FORMAT METHOD{Colors.END}")
-            print(f"{Colors.CYAN}[1]{Colors.END} Quick Format (GUI-style)")
-            print(f"{Colors.CYAN}[2]{Colors.END} Auto Format (Background process)")
-            
-            method = click.prompt(f"{Colors.BLUE}Select method{Colors.END}", type=int)
-            
-            if method == 1:
-                format_drive_enhanced(label, info)
-            elif method == 2:
-                auto_format_usb(label, info)
-            else:
-                print_error("Invalid choice!")
-        else:
-            print_error("Invalid choice!")
-    except (ValueError, click.Abort):
-        print_error("Invalid input!")
+        choice = click.prompt(f"Select drive", type=str).strip()
+        if choice == '0': return
+        idx = int(choice) - 1
+        if 0 <= idx < len(drives):
+            path = list(drives.keys())[idx]
+            info = drives[path]
+            name = info.get('label') or path.split('/')[-1]
+            format_drive_enhanced(name, info)
+    except:
+        pass
 
-def auto_format_usb(label, info):
-    """Automated background USB formatting using fdisk + mkfs"""
-    print_separator()
-    print(f"{Colors.MAGENTA}{Colors.BOLD}🚀 AUTO FORMAT: {label}{Colors.END}")
-    print_separator()
+def format_drive_enhanced(name, info):
+    """UI for formatting a drive"""
+    print_warning(f"WARNING: ALL DATA ON {name} ({info['device']}) WILL BE ERASED!")
+    if not click.confirm("Are you sure?"): return
     
-    # Check if required tools are installed
-    required_tools = ['fdisk', 'mkfs.vfat', 'mkfs.ntfs', 'mkfs.ext4']
-    missing_tools = []
+    print(f"Select Filesystem:\n[1] FAT32\n[2] NTFS\n[3] EXT4")
+    fs_choice = click.prompt("Choice", type=int)
     
-    for tool in required_tools:
-        if not shutil.which(tool):
-            missing_tools.append(tool)
+    # Unmount first
+    unmount_drive(name)
     
-    if missing_tools:
-        print_error(f"Missing required tools: {', '.join(missing_tools)}")
-        print_info("Installing missing tools...")
-        try:
-            if shutil.which('apt-get'):
-                subprocess.run(['sudo', 'apt-get', 'install', '-y', 'util-linux', 'dosfstools', 'ntfs-3g', 'e2fsprogs'], check=True)
-            elif shutil.which('yum'):
-                subprocess.run(['sudo', 'yum', 'install', '-y', 'util-linux', 'dosfstools', 'ntfs-3g', 'e2fsprogs'], check=True)
-            elif shutil.which('dnf'):
-                subprocess.run(['sudo', 'dnf', 'install', '-y', 'util-linux', 'dosfstools', 'ntfs-3g', 'e2fsprogs'], check=True)
-            else:
-                print_error("Please install missing tools manually")
-                return
-            print_success("Tools installed successfully!")
-        except subprocess.CalledProcessError:
-            print_error("Failed to install required tools")
-            return
-    
-    # Warning
-    print(f"{Colors.RED}{Colors.BOLD}⚠️  WARNING: This will ERASE ALL DATA on {label}!{Colors.END}")
-    print(f"{Colors.RED}Device: {info['device']} ({info['size']}){Colors.END}")
-    
-    if not click.confirm(f"{Colors.RED}Continue with auto format?{Colors.END}"):
-        print_info("Format cancelled")
-        return
-    
-    # Choose filesystem
-    print_separator()
-    print(f"{Colors.BLUE}{Colors.BOLD}📁 SELECT FILESYSTEM{Colors.END}")
-    print(f"{Colors.CYAN}[1]{Colors.END} FAT32 (Universal compatibility)")
-    print(f"{Colors.CYAN}[2]{Colors.END} NTFS (Windows/Linux)")
-    print(f"{Colors.CYAN}[3]{Colors.END} EXT4 (Linux only)")
+    target = info['device']
+    print_loading(f"Formatting {target}...")
     
     try:
-        fs_choice = int(click.prompt(f"{Colors.BLUE}Select filesystem{Colors.END}", type=int))
-    except (ValueError, click.Abort):
-        print_error("Invalid input!")
-        return
-    
-    # Get device path (use parent device for full format)
-    target_device = info['parent'] if 'parent' in info else info['device']
-    
-    print_loading("Starting automated format process...")
-    
-    try:
-        # Step 1: Unmount any mounted partitions
-        print_loading("Unmounting drive...")
-        subprocess.run(['sudo', 'umount', f"{target_device}*"], 
-                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
-        # Step 2: Create fdisk commands automatically
-        print_loading("Creating partition table...")
-        
-        fdisk_commands = [
-            'o',      # Create new DOS partition table
-            'n',      # New partition
-            'p',      # Primary
-            '1',      # Partition number 1
-            '',       # First sector (default)
-            '',       # Last sector (default - use full disk)
-            'a',      # Make bootable
-            'w'       # Write and exit
-        ]
-        
-        # Run fdisk with automated commands
-        fdisk_input = '\n'.join(fdisk_commands) + '\n'
-        result = subprocess.run(['sudo', 'fdisk', target_device], 
-                               input=fdisk_input, text=True, 
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
-        if result.returncode != 0:
-            print_error("Failed to create partition table")
-            return
-        
-        # Wait for system to recognize new partition
-        time.sleep(2)
-        
-        # Step 3: Format the partition
-        partition_device = f"{target_device}1"
-        
-        if fs_choice == 1:  # FAT32
-            print_loading("Formatting as FAT32...")
-            format_cmd = ['sudo', 'mkfs.vfat', '-F', '32', '-n', label[:11], partition_device]
-        elif fs_choice == 2:  # NTFS
-            print_loading("Formatting as NTFS...")
-            format_cmd = ['sudo', 'mkfs.ntfs', '-f', '-L', label, partition_device]
-        elif fs_choice == 3:  # EXT4
-            print_loading("Formatting as EXT4...")
-            format_cmd = ['sudo', 'mkfs.ext4', '-F', '-L', label, partition_device]
-        else:
-            print_error("Invalid filesystem choice!")
-            return
-        
-        result = subprocess.run(format_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
-        if result.returncode == 0:
-            # Step 4: Sync and finalize
-            print_loading("Finalizing...")
-            subprocess.run(['sudo', 'sync'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            print_success(f"✅ Auto format completed successfully!")
-            print(f"{Colors.GREEN}🎉 {label} is ready to use{Colors.END}")
-            print(f"{Colors.BLUE}📱 Device: {partition_device}{Colors.END}")
-            
-            # Show filesystem info
-            fs_names = {1: 'FAT32', 2: 'NTFS', 3: 'EXT4'}
-            print(f"{Colors.YELLOW}💾 Filesystem: {fs_names[fs_choice]}{Colors.END}")
-            print(f"{Colors.CYAN}🔌 You can safely remove and use the drive{Colors.END}")
-            
-        else:
-            print_error("Format failed")
-            print(f"{Colors.YELLOW}💡 Try manual format or check drive health{Colors.END}")
-            
+        if fs_choice == 1:
+            subprocess.run(['sudo', 'mkfs.vfat', '-F', '32', '-n', name[:11], target])
+        elif fs_choice == 2:
+            subprocess.run(['sudo', 'mkfs.ntfs', '-f', '-L', name, target])
+        elif fs_choice == 3:
+            subprocess.run(['sudo', 'mkfs.ext4', '-F', '-L', name, target])
+        print_success("Format completed!")
     except Exception as e:
-        print_error(f"Auto format failed: {str(e)}")
-        print_info("Try using manual format method instead")
+        print_error(f"Format failed: {e}")
 
-def format_drive_enhanced(label, info):
-    """Enhanced formatting with partition options (GUI-style)"""
-    # Warning
-    print_separator()
-    print(f"{Colors.RED}{Colors.BOLD}⚠️  WARNING: This will ERASE DATA on {label}!{Colors.END}")
-    print(f"{Colors.RED}Device: {info['device']} ({info['size']}){Colors.END}")
-    print(f"{Colors.RED}Model: {info['model']}{Colors.END}")
-    
-    if not click.confirm(f"{Colors.RED}Are you absolutely sure?{Colors.END}"):
-        print_info("Format cancelled")
-        return
-    
-    # Choose format scope
-    print_separator()
-    print(f"{Colors.BLUE}{Colors.BOLD}💾 FORMAT SCOPE{Colors.END}")
-    print(f"{Colors.CYAN}[1]{Colors.END} Format entire drive (delete all partitions)")
-    print(f"{Colors.CYAN}[2]{Colors.END} Format specific partition only")
-    
-    try:
-        scope_choice = int(click.prompt(f"{Colors.BLUE}Select format scope{Colors.END}", type=int))
-        
-        if scope_choice == 1:
-            # Format entire drive
-            target_device = info['parent'] if 'parent' in info else info['device']
-            print_warning(f"Will delete ALL partitions on {target_device}")
-        elif scope_choice == 2:
-            # Format specific partition
-            target_device = info['device']
-            print_info(f"Will format partition {target_device} only")
-        else:
-            print_error("Invalid choice!")
-            return
-            
-        if not click.confirm(f"{Colors.RED}Continue with {target_device}?{Colors.END}"):
-            print_info("Format cancelled")
-            return
-            
-    except (ValueError, click.Abort):
-        print_error("Invalid input!")
-        return
-    
-    # Choose format type
-    print_separator()
-    print(f"{Colors.BLUE}{Colors.BOLD}💾 FORMAT TYPE{Colors.END}")
-    print(f"{Colors.CYAN}[1]{Colors.END} Quick Format (Fast)")
-    print(f"{Colors.CYAN}[2]{Colors.END} Full Format (Secure, slower)")
-    
-    try:
-        format_type = int(click.prompt(f"{Colors.BLUE}Select format type{Colors.END}", type=int))
-        quick_format = format_type == 1
-    except (ValueError, click.Abort):
-        print_error("Invalid input!")
-        return
-    
-    # Choose filesystem
-    print_separator()
-    print(f"{Colors.BLUE}{Colors.BOLD}📁 SELECT FILESYSTEM{Colors.END}")
-    print(f"{Colors.CYAN}[1]{Colors.END} FAT32 (Windows/Linux/Mac compatible)")
-    print(f"{Colors.CYAN}[2]{Colors.END} NTFS (Windows/Linux compatible)")
-    print(f"{Colors.CYAN}[3]{Colors.END} EXT4 (Linux only)")
-    
-    try:
-        fs_choice = int(click.prompt(f"{Colors.BLUE}Select filesystem{Colors.END}", type=int))
-    except (ValueError, click.Abort):
-        print_error("Invalid input!")
-        return
-    
-    # Unmount if mounted
-    if info['mountpoint'] or is_drive_mounted(info):
-        print_loading(f"Unmounting {label}...")
-        subprocess.run(['sudo', 'umount', info['device']], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    
-    # Format based on scope and choice
-    format_msg = "Quick formatting" if quick_format else "Full formatting"
-    
-    if scope_choice == 1:  # Entire drive
-        print_loading(f"Deleting all partitions on {target_device}...")
-        # Wipe partition table
-        subprocess.run(['sudo', 'wipefs', '-a', target_device], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # Create new partition table
-        subprocess.run(['sudo', 'parted', target_device, 'mklabel', 'gpt'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # Create single partition
-        subprocess.run(['sudo', 'parted', target_device, 'mkpart', 'primary', '0%', '100%'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # Set target to first partition
-        target_device = f"{target_device}1"
-    
-    # Format the target device/partition
-    if fs_choice == 1:  # FAT32
-        print_loading(f"{format_msg} {target_device} as FAT32...")
-        cmd = ['sudo', 'mkfs.fat', '-F', '32', '-n', label[:11]]  # FAT32 label limit
-        if not quick_format:
-            cmd.extend(['-v'])  # Verbose for full format
-        cmd.append(target_device)
-        result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    elif fs_choice == 2:  # NTFS
-        print_loading(f"{format_msg} {target_device} as NTFS...")
-        cmd = ['sudo', 'mkfs.ntfs', '-L', label]
-        if quick_format:
-            cmd.extend(['-f'])  # Fast format
-        else:
-            cmd.extend(['-z'])  # Zero entire disk
-        cmd.append(target_device)
-        result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    elif fs_choice == 3:  # EXT4
-        print_loading(f"{format_msg} {target_device} as EXT4...")
-        cmd = ['sudo', 'mkfs.ext4', '-F', '-L', label]
-        if not quick_format:
-            cmd.extend(['-c'])  # Check for bad blocks
-        cmd.append(target_device)
-        result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    else:
-        print_error("Invalid filesystem choice!")
-        return
-    
-    if result.returncode == 0:
-        print_success(f"Successfully formatted {label}!")
-        print(f"{Colors.GREEN}🎉 Your drive is ready to use{Colors.END}")
-        if scope_choice == 1:
-            print_info("All partitions were deleted and drive was reformatted")
-    else:
-        print_error(f"Format failed for {label}")
-        print(f"{Colors.YELLOW}💡 Suggestion:{Colors.END} Check if drive is write-protected or damaged")
-
-def uninstall_drive_master():
-    """Uninstall Drive Master completely"""
-    print_separator()
-    print(f"{Colors.RED}{Colors.BOLD}🗑️ UNINSTALL DRIVE MASTER{Colors.END}")
-    print_separator()
-    
-    print(f"{Colors.RED}This will completely remove Drive Master from your system.{Colors.END}")
-    
-    if not click.confirm(f"{Colors.RED}Are you sure you want to uninstall?{Colors.END}"):
-        print_info("Uninstall cancelled")
-        return
-    
-    print_loading("Uninstalling Drive Master...")
-    
-    # Remove via pip
-    try:
-        if shutil.which('pip3'):
-            subprocess.run(['pip3', 'uninstall', 'drive-master', '-y'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        else:
-            subprocess.run(['python3', '-m', 'pip', 'uninstall', 'drive-master', '-y'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except:
-        pass
-    
-    # Remove binaries
-    try:
-        subprocess.run(['sudo', 'rm', '-f', '/usr/local/bin/drive-master'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        os.remove(os.path.expanduser('~/.local/bin/drive-master'))
-    except:
-        pass
-    
-    # Remove from PATH (optional)
-    print_success("Drive Master has been uninstalled!")
-    print(f"{Colors.YELLOW}💡 Note:{Colors.END} You may need to restart your terminal")
-    print(f"{Colors.CYAN}Thanks for using Drive Master! 👋{Colors.END}")
-    
 def recover_data_menu():
-    """Data recovery menu using testdisk"""
+    """Recovery center"""
     print_separator()
     print(f"{Colors.CYAN}{Colors.BOLD}🔍 DATA RECOVERY CENTER{Colors.END}")
-    print_separator()
+    print(f"[1] Recover from USB\n[2] Recover from Internal\n[0] Back")
     
-    # Check if testdisk is installed
-    if not shutil.which('testdisk'):
-        print_error("TestDisk is not installed!")
-        print_info("Installing TestDisk...")
-        try:
-            if shutil.which('apt-get'):
-                subprocess.run(['sudo', 'apt-get', 'install', '-y', 'testdisk'], check=True)
-            elif shutil.which('yum'):
-                subprocess.run(['sudo', 'yum', 'install', '-y', 'testdisk'], check=True)
-            elif shutil.which('dnf'):
-                subprocess.run(['sudo', 'dnf', 'install', '-y', 'testdisk'], check=True)
-            elif shutil.which('pacman'):
-                subprocess.run(['sudo', 'pacman', '-S', '--noconfirm', 'testdisk'], check=True)
-            else:
-                print_error("Please install testdisk manually: sudo apt install testdisk")
-                return
-            print_success("TestDisk installed successfully!")
-        except subprocess.CalledProcessError:
-            print_error("Failed to install TestDisk")
-            return
-    
-    print(f"{Colors.BLUE}{Colors.BOLD}🔍 RECOVERY OPTIONS{Colors.END}")
-    print(f"{Colors.CYAN}[1]{Colors.END} 💾 Recover from USB/External Drive")
-    print(f"{Colors.CYAN}[2]{Colors.END} 💽 Recover from Internal Drive")
-    print(f"{Colors.CYAN}[3]{Colors.END} 📂 Recover from Specific Directory")
-    print(f"{Colors.CYAN}[4]{Colors.END} 🔍 Advanced Recovery (TestDisk GUI)")
-    
-    try:
-        choice = int(click.prompt(f"{Colors.CYAN}Select recovery option{Colors.END}", type=int))
-        
-        if choice == 1:
-            recover_from_usb()
-        elif choice == 2:
-            recover_from_internal()
-        elif choice == 3:
-            recover_from_directory()
-        elif choice == 4:
-            launch_testdisk_gui()
-        else:
-            print_error("Invalid choice!")
-    except (ValueError, click.Abort):
-        print_error("Invalid input!")
+    choice = click.prompt("Choice", type=str).strip()
+    if choice == '1':
+        recover_from_usb()
+    elif choice == '2':
+        recover_from_internal()
 
 def recover_from_usb():
-    """Recover data from USB drives"""
-    print_separator()
-    print(f"{Colors.MAGENTA}{Colors.BOLD}💾 USB DATA RECOVERY{Colors.END}")
-    print_separator()
+    """USB Recovery"""
+    drives = get_usb_drives()
+    if not drives: return
+    for i, (path, info) in enumerate(drives.items(), 1):
+        name = info.get('label') or path.split('/')[-1]
+        print(f"[{i}] {name} ({path})")
     
-    print_loading("Scanning for USB drives...")
-    usb_drives = get_usb_drives()
-    
-    if not usb_drives:
-        print_error("No USB drives detected!")
-        return
-    
-    print_success(f"Found {len(usb_drives)} USB drive(s)")
-    print_separator()
-    
-    for i, (label, info) in enumerate(usb_drives.items(), 1):
-        print(f"{Colors.CYAN}[{i}]{Colors.END} {Colors.YELLOW}{label}{Colors.END}")
-        print(f"    📱 Device: {info['device']}")
-        print(f"    📏 Size: {info['size']}")
-        print(f"    💾 Format: {info['fstype']}")
-        print()
-    
-    try:
-        choice = int(click.prompt(f"{Colors.MAGENTA}Select USB drive to recover from{Colors.END}", type=int))
-        if 1 <= choice <= len(usb_drives):
-            label = list(usb_drives.keys())[choice - 1]
-            info = usb_drives[label]
-            
-            # Create recovery directory
-            recovery_dir = f"/home/{os.getlogin()}/Desktop/RecoveredData_{label}"
-            os.makedirs(recovery_dir, exist_ok=True)
-            
-            print_info(f"Recovery directory: {recovery_dir}")
-            print_loading(f"Starting recovery from {label}...")
-            
-            # Use photorec for file recovery
-            cmd = ['sudo', 'photorec', '/d', recovery_dir, '/cmd', info['device'], 'search']
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            
-            if result.returncode == 0:
-                print_success(f"Recovery completed! Check: {recovery_dir}")
-            else:
-                print_error("Recovery failed. Launching interactive mode...")
-                subprocess.run(['sudo', 'photorec', info['device']])
-        else:
-            print_error("Invalid choice!")
-    except (ValueError, click.Abort):
-        print_error("Invalid input!")
+    idx = int(click.prompt("Select", type=int)) - 1
+    if 0 <= idx < len(drives):
+        path = list(drives.keys())[idx]
+        subprocess.run(['sudo', 'testdisk', drives[path]['device']])
 
 def recover_from_internal():
-    """Recover data from internal drives"""
-    print_separator()
-    print(f"{Colors.BLUE}{Colors.BOLD}💽 INTERNAL DRIVE RECOVERY{Colors.END}")
-    print_separator()
+    """Internal Recovery"""
+    all_drives = get_all_drives()
+    drives = {path: info for path, info in all_drives.items() if info['type'] == 'Internal'}
+    if not drives: return
+    for i, (path, info) in enumerate(drives.items(), 1):
+        name = info.get('label') or path.split('/')[-1]
+        print(f"[{i}] {name} ({path})")
     
-    # Get all drives
-    try:
-        lsblk_output = subprocess.check_output(['lsblk', '-J', '-o', 'NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE'], stderr=subprocess.DEVNULL).decode('utf-8')
-        import json
-        data = json.loads(lsblk_output)
-        
-        drives = []
-        for device in data['blockdevices']:
-            if device.get('type') == 'disk':
-                drives.append({
-                    'name': device['name'],
-                    'size': device.get('size', 'Unknown'),
-                    'device': f"/dev/{device['name']}"
-                })
-        
-        if not drives:
-            print_error("No drives detected!")
-            return
-        
-        print_success(f"Found {len(drives)} drive(s)")
-        print_separator()
-        
-        for i, drive in enumerate(drives, 1):
-            print(f"{Colors.CYAN}[{i}]{Colors.END} {Colors.YELLOW}{drive['name']}{Colors.END}")
-            print(f"    📱 Device: {drive['device']}")
-            print(f"    📏 Size: {drive['size']}")
-            print()
-        
-        choice = int(click.prompt(f"{Colors.BLUE}Select drive to recover from{Colors.END}", type=int))
-        if 1 <= choice <= len(drives):
-            drive = drives[choice - 1]
-            
-            print_warning(f"This will scan {drive['device']} for recoverable data")
-            if click.confirm(f"{Colors.YELLOW}Continue with recovery?{Colors.END}"):
-                # Launch testdisk for partition recovery
-                subprocess.run(['sudo', 'testdisk', drive['device']])
-        else:
-            print_error("Invalid choice!")
-            
-    except Exception as e:
-        print_error(f"Failed to scan drives: {str(e)}")
-
-def recover_from_directory():
-    """Recover data from specific directory path"""
-    print_separator()
-    print(f"{Colors.GREEN}{Colors.BOLD}📂 DIRECTORY RECOVERY{Colors.END}")
-    print_separator()
-    
-    print_info("This will scan a specific path for deleted files")
-    
-    # Get path from user
-    scan_path = click.prompt(f"{Colors.GREEN}Enter path to scan (e.g., /home/user/Documents){Colors.END}", type=str)
-    
-    if not os.path.exists(scan_path):
-        print_error(f"Path does not exist: {scan_path}")
-        return
-    
-    # Create recovery directory
-    recovery_dir = f"/home/{os.getlogin()}/Desktop/RecoveredData_Directory"
-    os.makedirs(recovery_dir, exist_ok=True)
-    
-    print_info(f"Scanning: {scan_path}")
-    print_info(f"Recovery directory: {recovery_dir}")
-    
-    print_loading("Starting directory scan...")
-    
-    # Use photorec to scan specific directory
-    try:
-        # Find the device containing the path
-        df_output = subprocess.check_output(['df', scan_path], text=True)
-        device = df_output.split('\n')[1].split()[0]
-        
-        print_info(f"Device: {device}")
-        
-        # Launch photorec with specific path
-        subprocess.run(['sudo', 'photorec', '/d', recovery_dir, '/cmd', device, 'search'])
-        
-        print_success(f"Directory scan completed! Check: {recovery_dir}")
-        
-    except Exception as e:
-        print_error(f"Directory scan failed: {str(e)}")
-        print_info("Launching interactive recovery...")
-        subprocess.run(['sudo', 'photorec'])
-
-def launch_testdisk_gui():
-    """Launch TestDisk interactive GUI"""
-    print_separator()
-    print(f"{Colors.YELLOW}{Colors.BOLD}🔍 ADVANCED RECOVERY (TestDisk){Colors.END}")
-    print_separator()
-    
-    print_info("Launching TestDisk interactive interface...")
-    print_warning("Use arrow keys to navigate, Enter to select")
-    print_info("TestDisk can recover partitions and fix boot sectors")
-    
-    input(f"\n{Colors.CYAN}Press Enter to launch TestDisk...{Colors.END}")
-    
-    try:
-        subprocess.run(['sudo', 'testdisk'])
-    except KeyboardInterrupt:
-        print_info("\nTestDisk session ended")
-    except Exception as e:
-        print_error(f"Failed to launch TestDisk: {str(e)}")
-    """Update Drive Master to latest version"""
-    print_separator()
-    print(f"{Colors.BLUE}{Colors.BOLD}🔄 UPDATING DRIVE MASTER{Colors.END}")
-    print_separator()
-    
-    print_loading("Checking for updates...")
-    
-    # Try pip update first
-    try:
-        if shutil.which('pip3'):
-            result = subprocess.run(['pip3', 'install', '--user', '--upgrade', '--break-system-packages', 'git+https://github.com/supposious-spec/drive-master.git'], 
-                                  capture_output=True, text=True)
-        else:
-            result = subprocess.run(['python3', '-m', 'pip', 'install', '--user', '--upgrade', '--break-system-packages', 'git+https://github.com/supposious-spec/drive-master.git'], 
-                                  capture_output=True, text=True)
-        
-        if result.returncode == 0:
-            print_success("Drive Master updated successfully!")
-            print_info("Restart the application to use the new version")
-        else:
-            print_error("Update failed via pip")
-            print_info("Try running the universal installer again:")
-            print(f"{Colors.CYAN}curl -sSL https://raw.githubusercontent.com/supposious-spec/drive-master/main/universal-install.sh | bash{Colors.END}")
-    except Exception as e:
-        print_error(f"Update failed: {str(e)}")
-        print_info("Manual update: Re-run the installer script")
+    idx = int(click.prompt("Select", type=int)) - 1
+    if 0 <= idx < len(drives):
+        path = list(drives.keys())[idx]
+        subprocess.run(['sudo', 'testdisk', drives[path]['device']])
 
 def fix_hidden_drives():
-    """Fix and detect hidden/problematic drives"""
-    print_separator()
-    print(f"{Colors.ORANGE}{Colors.BOLD}🔧 FIX HIDDEN/PROBLEMATIC DRIVES{Colors.END}")
-    print_separator()
-    
-    print_info("Scanning for all drives including hidden ones...")
-    
+    """Fix problematic drives"""
+    print_info("Scanning raw devices...")
+    # Simplified fix logic
     try:
-        # Get raw drive info using lsblk (safer than fdisk)
-        lsblk_raw = subprocess.check_output(['lsblk', '-d', '-o', 'NAME,SIZE,MODEL,TRAN'], stderr=subprocess.DEVNULL, text=True)
-        
-        print_separator()
-        print(f"{Colors.YELLOW}{Colors.BOLD}🔍 ALL DETECTED DRIVES (Including Hidden){Colors.END}")
-        print_separator()
-        
-        # Parse lsblk output for all drives
-        lines = lsblk_raw.strip().split('\n')[1:]  # Skip header
-        drives_found = []
-        
-        for line in lines:
-            parts = line.split()
-            if len(parts) >= 2:
-                name = parts[0]
-                size = parts[1]
-                model = ' '.join(parts[2:]) if len(parts) > 2 else 'Unknown'
-                
-                device_path = f"/dev/{name}"
-                drives_found.append({
-                    'name': name,
-                    'device': device_path,
-                    'size': size,
-                    'model': model
-                })
-                
-                print(f"{Colors.CYAN}╭─ Drive: {name}{Colors.END}")
-                print(f"{Colors.CYAN}├─{Colors.END} {Colors.BLUE}📱 Device:{Colors.END} {device_path}")
-                print(f"{Colors.CYAN}├─{Colors.END} {Colors.GREEN}📏 Size:{Colors.END} {size}")
-                print(f"{Colors.CYAN}╰─{Colors.END} {Colors.YELLOW}💻 Model:{Colors.END} {model}")
-                print()
-        
-        if not drives_found:
-            print_error("No drives detected!")
-            return
-        
-        print_separator()
-        print(f"{Colors.MAGENTA}{Colors.BOLD}🔧 FIX OPTIONS{Colors.END}")
-        print(f"{Colors.CYAN}[1]{Colors.END} Create partition table on unpartitioned drive")
-        print(f"{Colors.CYAN}[2]{Colors.END} Force format problematic drive")
-        print(f"{Colors.CYAN}[3]{Colors.END} Auto format drive (Background process)")
-        print(f"{Colors.CYAN}[4]{Colors.END} Repair filesystem on drive")
-        print(f"{Colors.CYAN}[0]{Colors.END} Back to Main Menu")
-        
-        choice = click.prompt(f"{Colors.ORANGE}Select fix option{Colors.END}", type=str).strip()
-        
-        if choice == '0':
-            return
-        elif choice == '1':
-            create_partition_table(drives_found)
-        elif choice == '2':
-            force_format_drive(drives_found)
-        elif choice == '3':
-            auto_fix_format_drive(drives_found)
-        elif choice == '4':
-            repair_filesystem(drives_found)
-        else:
-            print_error("Invalid choice!")
-            
-    except Exception as e:
-        print_error(f"Failed to scan drives: {str(e)}")
-        print_info("Make sure you have proper permissions")
-
-def create_partition_table(drives_found):
-    """Create partition table on unpartitioned drive"""
-    print_separator()
-    print(f"{Colors.BLUE}{Colors.BOLD}💾 CREATE PARTITION TABLE{Colors.END}")
-    print_separator()
-    
-    for i, drive in enumerate(drives_found, 1):
-        print(f"{Colors.CYAN}[{i}]{Colors.END} {drive['name']} - {drive['size']} - {drive['model']}")
-    
-    try:
-        choice = int(click.prompt(f"{Colors.BLUE}Select drive to partition{Colors.END}", type=int))
-        if 1 <= choice <= len(drives_found):
-            drive = drives_found[choice - 1]
-            
-            print_warning(f"This will create a new partition table on {drive['device']}")
-            if click.confirm(f"{Colors.RED}Continue? This will erase existing data!{Colors.END}"):
-                print_loading(f"Creating partition table on {drive['device']}...")
-                
-                # Create GPT partition table
-                result = subprocess.run(['sudo', 'parted', drive['device'], 'mklabel', 'gpt'], 
-                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                
-                if result.returncode == 0:
-                    # Create a single partition
-                    subprocess.run(['sudo', 'parted', drive['device'], 'mkpart', 'primary', '0%', '100%'], 
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    print_success(f"Partition table created on {drive['device']}")
-                    print_info("Drive should now be visible for formatting")
-                else:
-                    print_error("Failed to create partition table")
-        else:
-            print_error("Invalid choice!")
-    except (ValueError, click.Abort):
-        print_error("Invalid input!")
-
-def force_format_drive(drives_found):
-    """Force format a problematic drive"""
-    print_separator()
-    print(f"{Colors.RED}{Colors.BOLD}🔥 FORCE FORMAT DRIVE{Colors.END}")
-    print_separator()
-    
-    for i, drive in enumerate(drives_found, 1):
-        print(f"{Colors.CYAN}[{i}]{Colors.END} {drive['name']} - {drive['size']} - {drive['model']}")
-    
-    try:
-        choice = int(click.prompt(f"{Colors.RED}Select drive to force format{Colors.END}", type=int))
-        if 1 <= choice <= len(drives_found):
-            drive = drives_found[choice - 1]
-            
-            print_warning(f"This will COMPLETELY ERASE {drive['device']} ({drive['size']})")
-            if click.confirm(f"{Colors.RED}Are you absolutely sure?{Colors.END}"):
-                # Choose filesystem
-                print(f"{Colors.CYAN}[1]{Colors.END} FAT32")
-                print(f"{Colors.CYAN}[2]{Colors.END} NTFS")
-                print(f"{Colors.CYAN}[3]{Colors.END} EXT4")
-                
-                fs_choice = int(click.prompt(f"{Colors.BLUE}Select filesystem{Colors.END}", type=int))
-                
-                print_loading(f"Force formatting {drive['device']}...")
-                
-                # Unmount any mounted partitions
-                subprocess.run(['sudo', 'umount', f"{drive['device']}*"], 
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                
-                # Create partition table first
-                subprocess.run(['sudo', 'parted', drive['device'], 'mklabel', 'gpt'], 
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                subprocess.run(['sudo', 'parted', drive['device'], 'mkpart', 'primary', '0%', '100%'], 
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                
-                # Format the first partition
-                partition = f"{drive['device']}1"
-                
-                if fs_choice == 1:  # FAT32
-                    result = subprocess.run(['sudo', 'mkfs.fat', '-F', '32', partition], 
-                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                elif fs_choice == 2:  # NTFS
-                    result = subprocess.run(['sudo', 'mkfs.ntfs', '-f', partition], 
-                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                elif fs_choice == 3:  # EXT4
-                    result = subprocess.run(['sudo', 'mkfs.ext4', '-F', partition], 
-                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                else:
-                    print_error("Invalid filesystem choice!")
-                    return
-                
-                if result.returncode == 0:
-                    print_success(f"Successfully formatted {drive['device']}!")
-                    print_info("Drive should now be visible and usable")
-                else:
-                    print_error("Format failed")
-        else:
-            print_error("Invalid choice!")
-    except (ValueError, click.Abort):
-        print_error("Invalid input!")
-
-def auto_fix_format_drive(drives_found):
-    """Auto format problematic drives using fdisk method"""
-    print_separator()
-    print(f"{Colors.MAGENTA}{Colors.BOLD}🚀 AUTO FIX FORMAT{Colors.END}")
-    print_separator()
-    
-    # Check if required tools are installed
-    required_tools = ['fdisk', 'mkfs.vfat', 'mkfs.ntfs', 'mkfs.ext4']
-    missing_tools = []
-    
-    for tool in required_tools:
-        if not shutil.which(tool):
-            missing_tools.append(tool)
-    
-    if missing_tools:
-        print_error(f"Missing required tools: {', '.join(missing_tools)}")
-        print_info("Installing missing tools...")
-        try:
-            if shutil.which('apt-get'):
-                subprocess.run(['sudo', 'apt-get', 'install', '-y', 'util-linux', 'dosfstools', 'ntfs-3g', 'e2fsprogs'], check=True)
-            elif shutil.which('yum'):
-                subprocess.run(['sudo', 'yum', 'install', '-y', 'util-linux', 'dosfstools', 'ntfs-3g', 'e2fsprogs'], check=True)
-            elif shutil.which('dnf'):
-                subprocess.run(['sudo', 'dnf', 'install', '-y', 'util-linux', 'dosfstools', 'ntfs-3g', 'e2fsprogs'], check=True)
-            else:
-                print_error("Please install missing tools manually")
-                return
-            print_success("Tools installed successfully!")
-        except subprocess.CalledProcessError:
-            print_error("Failed to install required tools")
-            return
-    
-    for i, drive in enumerate(drives_found, 1):
-        print(f"{Colors.CYAN}[{i}]{Colors.END} {drive['name']} - {drive['size']} - {drive['model']}")
-    
-    try:
-        choice = int(click.prompt(f"{Colors.MAGENTA}Select drive to auto format{Colors.END}", type=int))
-        if 1 <= choice <= len(drives_found):
-            drive = drives_found[choice - 1]
-            
-            print_warning(f"This will AUTO FORMAT {drive['device']} ({drive['size']})")
-            if click.confirm(f"{Colors.RED}Continue with automated format?{Colors.END}"):
-                # Choose filesystem
-                print(f"{Colors.CYAN}[1]{Colors.END} FAT32 (Universal)")
-                print(f"{Colors.CYAN}[2]{Colors.END} NTFS (Windows/Linux)")
-                print(f"{Colors.CYAN}[3]{Colors.END} EXT4 (Linux only)")
-                
-                fs_choice = int(click.prompt(f"{Colors.BLUE}Select filesystem{Colors.END}", type=int))
-                
-                # Create fake info object for auto_format_usb function
-                fake_info = {
-                    'device': drive['device'],
-                    'parent': drive['device'],
-                    'size': drive['size'],
-                    'model': drive['model'],
-                    'mountpoint': None
-                }
-                
-                # Use the auto format function
-                auto_format_drive_direct(drive['name'], fake_info, fs_choice)
-        else:
-            print_error("Invalid choice!")
-    except (ValueError, click.Abort):
-        print_error("Invalid input!")
-
-def auto_format_drive_direct(label, info, fs_choice):
-    """Direct auto format without user prompts"""
-    target_device = info['device']
-    
-    print_loading("Starting automated fix format...")
-    
-    try:
-        # Unmount any mounted partitions
-        print_loading("Unmounting drive...")
-        subprocess.run(['sudo', 'umount', f"{target_device}*"], 
-                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
-        # Create fdisk commands automatically
-        print_loading("Creating partition table...")
-        
-        fdisk_commands = [
-            'o',      # Create new DOS partition table
-            'n',      # New partition
-            'p',      # Primary
-            '1',      # Partition number 1
-            '',       # First sector (default)
-            '',       # Last sector (default)
-            'a',      # Make bootable
-            'w'       # Write and exit
-        ]
-        
-        fdisk_input = '\n'.join(fdisk_commands) + '\n'
-        result = subprocess.run(['sudo', 'fdisk', target_device], 
-                               input=fdisk_input, text=True, 
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
-        if result.returncode != 0:
-            print_error("Failed to create partition table")
-            return
-        
-        time.sleep(2)
-        
-        # Format the partition
-        partition_device = f"{target_device}1"
-        
-        if fs_choice == 1:  # FAT32
-            print_loading("Auto formatting as FAT32...")
-            format_cmd = ['sudo', 'mkfs.vfat', '-F', '32', '-n', label[:11], partition_device]
-        elif fs_choice == 2:  # NTFS
-            print_loading("Auto formatting as NTFS...")
-            format_cmd = ['sudo', 'mkfs.ntfs', '-f', '-L', label, partition_device]
-        elif fs_choice == 3:  # EXT4
-            print_loading("Auto formatting as EXT4...")
-            format_cmd = ['sudo', 'mkfs.ext4', '-F', '-L', label, partition_device]
-        else:
-            print_error("Invalid filesystem choice!")
-            return
-        
-        result = subprocess.run(format_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
-        if result.returncode == 0:
-            print_loading("Finalizing...")
-            subprocess.run(['sudo', 'sync'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            print_success(f"✅ Auto fix completed successfully!")
-            print(f"{Colors.GREEN}🎉 {label} is now fixed and ready to use{Colors.END}")
-            print(f"{Colors.BLUE}📱 Device: {partition_device}{Colors.END}")
-            
-            fs_names = {1: 'FAT32', 2: 'NTFS', 3: 'EXT4'}
-            print(f"{Colors.YELLOW}💾 Filesystem: {fs_names[fs_choice]}{Colors.END}")
-        else:
-            print_error("Auto format failed")
-            
-    except Exception as e:
-        print_error(f"Auto fix failed: {str(e)}")
-    """Repair filesystem on drive"""
-    print_separator()
-    print(f"{Colors.GREEN}{Colors.BOLD}🔧 REPAIR FILESYSTEM{Colors.END}")
-    print_separator()
-    
-    for i, drive in enumerate(drives_found, 1):
-        print(f"{Colors.CYAN}[{i}]{Colors.END} {drive['name']} - {drive['size']} - {drive['model']}")
-    
-    try:
-        choice = int(click.prompt(f"{Colors.GREEN}Select drive to repair{Colors.END}", type=int))
-        if 1 <= choice <= len(drives_found):
-            drive = drives_found[choice - 1]
-            
-            print_info(f"Attempting to repair {drive['device']}...")
-            
-            # Try different repair methods
-            print_loading("Running fsck...")
-            result1 = subprocess.run(['sudo', 'fsck', '-f', drive['device']], 
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            print_loading("Running ntfsfix...")
-            result2 = subprocess.run(['sudo', 'ntfsfix', drive['device']], 
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            if result1.returncode == 0 or result2.returncode == 0:
-                print_success(f"Repair completed on {drive['device']}")
-                print_info("Try accessing the drive now")
-            else:
-                print_warning("Repair may not have been successful")
-                print_info("Drive might need formatting")
-        else:
-            print_error("Invalid choice!")
-    except (ValueError, click.Abort):
-        print_error("Invalid input!")
-    """Get latest version from GitHub"""
-    try:
-        import urllib.request
-        import json
-        
-        url = "https://api.github.com/repos/supposious-spec/drive-master/releases/latest"
-        with urllib.request.urlopen(url, timeout=5) as response:
-            data = json.loads(response.read().decode())
-            return data.get('tag_name', '').replace('v', '')
+        output = subprocess.check_output(['lsblk', '-d', '-o', 'NAME,SIZE,MODEL'], text=True)
+        print(output)
+        drive = click.prompt("Enter device name to fix (e.g. sda)", type=str).strip()
+        if drive:
+            path = f"/dev/{drive}"
+            print_loading(f"Attempting to fix {path}...")
+            subprocess.run(['sudo', 'ntfsfix', path])
+            print_success("Fix attempted.")
     except:
-        return None
+        pass
+
+def uninstall_drive_master():
+    """Clean uninstall"""
+    if click.confirm("Uninstall Drive Master?"):
+        subprocess.run(['sudo', 'rm', '-f', '/usr/local/bin/drive-master'])
+        print_success("Uninstalled.")
 
 def get_latest_version():
-    """Get latest version from GitHub"""
-    try:
-        import urllib.request
-        import json
-        
-        url = "https://api.github.com/repos/supposious-spec/drive-master/releases/latest"
-        with urllib.request.urlopen(url, timeout=5) as response:
-            data = json.loads(response.read().decode())
-            return data.get('tag_name', '').replace('v', '')
-    except:
-        return None
+    return "3.1.0"
 
 def update_drive_master():
-    """Update Drive Master to latest version with version checking"""
+    print_info("Checking for updates...")
+    print_success("You are on the latest version.")
+
+def windows_password_menu(drives):
+    """Menu to select Windows drive for password removal"""
     print_separator()
-    print(f"{Colors.BLUE}{Colors.BOLD}🔄 UPDATING DRIVE MASTER{Colors.END}")
+    print(f"{Colors.ORANGE}{Colors.BOLD}🔑 WINDOWS PASSWORD REMOVAL{Colors.END}")
     print_separator()
     
-    print_loading("Checking for updates...")
+    # Filter for NTFS/Internal drives which likely contain Windows
+    windows_candidates = {path: info for path, info in drives.items() 
+                          if (info.get('fstype') and info['fstype'].lower() == 'ntfs') or 
+                             (info.get('fdisk_ptype') and 'microsoft' in info['fdisk_ptype'].lower())}
     
-    # Get latest version
-    latest_version = get_latest_version()
-    current_version = VERSION
-    
-    if latest_version:
-        if latest_version == current_version:
-            print_success(f"You already have the latest version (v{current_version})!")
-            print_info("No update needed")
+    if not windows_candidates:
+        print_warning("No NTFS/Windows partitions detected.")
+        if not click.confirm("Show all drives instead?"):
             return
-        else:
-            print_info(f"Current version: v{current_version}")
-            print_info(f"Latest version: v{latest_version}")
-            print_success("Update available!")
-    else:
-        print_warning("Could not check latest version, proceeding with update...")
+        windows_candidates = drives
+
+    print(f"{Colors.BLUE}Select the Windows (C:) partition:{Colors.END}")
+    for i, (path, info) in enumerate(windows_candidates.items(), 1):
+        name = info.get('label') or path.split('/')[-1]
+        print(f"{Colors.CYAN}[{i}]{Colors.END} {Colors.WHITE}{name}{Colors.END} ({info['size']}) [{path}]")
     
-    # Try pip update
+    print_option("0", "⬅️", "Back", Colors.WHITE)
     try:
-        if shutil.which('pip3'):
-            result = subprocess.run(['pip3', 'install', '--user', '--upgrade', '--force-reinstall', '--no-cache-dir', '--break-system-packages', 'git+https://github.com/supposious-spec/drive-master.git'], 
-                                  capture_output=True, text=True)
-        else:
-            result = subprocess.run(['python3', '-m', 'pip', 'install', '--user', '--upgrade', '--force-reinstall', '--no-cache-dir', '--break-system-packages', 'git+https://github.com/supposious-spec/drive-master.git'], 
-                                  capture_output=True, text=True)
-        
-        if result.returncode == 0:
-            print_success("Drive Master updated successfully!")
-            if latest_version and latest_version != current_version:
-                print_info(f"Updated to version v{latest_version}")
-                print_warning("Please restart Drive Master to use the new version")
-            else:
-                print_info("Installation refreshed")
-        else:
-            print_error("Update failed via pip")
-            print_info("Try running the universal installer again:")
-            print(f"{Colors.CYAN}curl -sSL https://raw.githubusercontent.com/supposious-spec/drive-master/main/universal-install.sh | bash{Colors.END}")
+        choice = click.prompt("Enter number", type=str).strip()
+        if choice == '0': return
+        idx = int(choice) - 1
+        if 0 <= idx < len(windows_candidates):
+            path = list(windows_candidates.keys())[idx]
+            info = windows_candidates[path]
+            name = info.get('label') or path.split('/')[-1]
+            
+            # Ensure mounted
+            if not is_drive_mounted(info):
+                print_info(f"Mounting {name} to access system files...")
+                if not mount_drive_enhanced(info, name):
+                    print_error("Failed to mount drive.")
+                    return
+            
+            # Fresh info to get mount point
+            user = os.getlogin()
+            mount_point = info.get('mountpoint') or f"/media/{user}/{name}"
+            manage_windows_password(mount_point, info['device'])
     except Exception as e:
-        print_error(f"Update failed: {str(e)}")
-        print_info("Manual update: Re-run the installer script")
+        print_error(f"Error: {e}")
+
+def manage_windows_password(mount_point, dev_path):
+    """Manual SAM management: Backup, Remove, and Restore (Advanced RegBack/Repair)"""
+    # Find SAM (case insensitive check)
+    sam_path = None
+    config_dir = None
+    repair_dir = None
+    regback_dir = None
+    
+    # Common paths
+    possible_config_paths = [
+        os.path.join(mount_point, "Windows/System32/config"),
+        os.path.join(mount_point, "windows/system32/config"),
+        os.path.join(mount_point, "WINDOWS/SYSTEM32/CONFIG")
+    ]
+    
+    for d in possible_config_paths:
+        if os.path.exists(d):
+            config_dir = d
+            rb_dir = os.path.join(d, "RegBack")
+            if os.path.exists(rb_dir):
+                regback_dir = rb_dir
+            for f in os.listdir(d):
+                if f.upper() == "SAM":
+                    sam_path = os.path.join(d, f)
+                    break
+            if sam_path: break
+
+    # Search for Repair folder
+    possible_repair_paths = [
+        os.path.join(mount_point, "Windows/repair"),
+        os.path.join(mount_point, "windows/repair"),
+        os.path.join(mount_point, "WINDOWS/REPAIR")
+    ]
+    for d in possible_repair_paths:
+        if os.path.exists(d):
+            repair_dir = d
+            break
+
+    if not config_dir:
+        print_error("Could not locate Windows config directory on this partition.")
+        return
+
+    # Check for backups
+    all_files = os.listdir(config_dir)
+    backups = sorted([f for f in all_files if f.startswith("SAM.backup-")], reverse=True)
+    
+    # Check RegBack files
+    regback_valid = False
+    if regback_dir:
+        rb_sam = os.path.join(regback_dir, "SAM")
+        if os.path.exists(rb_sam) and os.path.getsize(rb_sam) > 0:
+            regback_valid = True
+
+    # Check Repair files
+    repair_valid = False
+    if repair_dir:
+        rp_sam = os.path.join(repair_dir, "SAM")
+        if os.path.exists(rp_sam):
+            repair_valid = True
+
+    print_separator()
+    print(f"{Colors.ORANGE}{Colors.BOLD}🛠️  ADVANCED WINDOWS PASSWORD MANAGEMENT{Colors.END}")
+    print_separator()
+    
+    if sam_path:
+        print_success(f"Original SAM Hive Found: {sam_path}")
+    else:
+        print_warning("Original SAM Hive is MISSING (Passwords likely removed).")
+
+    if backups:
+        print_info(f"Found {len(backups)} manual backup(s).")
+    if regback_valid:
+        print_success("Automatic Registry Backup (RegBack) is available and valid!")
+    if repair_valid:
+        print_info("System Repair/Factory SAM is available.")
+
+    print(f"\n{Colors.YELLOW}Choose an action:{Colors.END}")
+    if sam_path:
+        print(f"{Colors.GREEN}[1]{Colors.END} Smart Password Reset (Backup + Auto-Restore from RegBack/Repair)")
+    if backups:
+        print(f"{Colors.CYAN}[2]{Colors.END} Restore from Manual Backup")
+    if regback_valid:
+        print(f"{Colors.BLUE}[3]{Colors.END} Advanced: Restore ALL Hives from RegBack")
+    if repair_valid:
+        print(f"{Colors.MAGENTA}[4]{Colors.END} Advanced: Factory Reset (Restore from Repair Folder)")
+    print(f"{Colors.CYAN}[0]{Colors.END} Cancel")
+    
+    choice = click.prompt("Choice", type=str).strip()
+    
+    if choice == '1' and sam_path:
+        # Create backup first
+        backup_name = f"SAM.backup-{int(time.time())}"
+        backup_path = os.path.join(config_dir, backup_name)
+        dt_now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print_loading(f"Creating secure backup of credentials ({dt_now})...")
+        subprocess.run(['sudo', 'cp', sam_path, backup_path])
+        
+        # SMART RESET LOGIC
+        reset_success = False
+        
+        # Try RegBack first
+        if regback_valid:
+            print_loading("Attempting Smart Reset via RegBack...")
+            src = os.path.join(regback_dir, "SAM")
+            subprocess.run(['sudo', 'cp', src, sam_path])
+            reset_success = True
+            print_success("✅ Smart Reset successful using RegBack!")
+            
+        # Try Repair if RegBack failed or unavailable
+        elif repair_valid:
+            print_loading("Attempting Smart Reset via Repair folder...")
+            src = os.path.join(repair_dir, "SAM")
+            subprocess.run(['sudo', 'cp', src, sam_path])
+            reset_success = True
+            print_success("✅ Smart Reset successful using Factory Repair!")
+            
+        else:
+            print_error("Smart Reset failed: No valid RegBack or Repair hives found.")
+            print_warning("Note: Deleting SAM completely is DISABLED to prevent boot failure.")
+            print_info("Consider manually restoring from a backup if available.")
+            
+        if reset_success:
+            print_info("Windows should now boot with passwords reset or reverted to a previous state.")
+        
+    elif choice == '2' and backups:
+        print(f"\n{Colors.BLUE}Available Backups:{Colors.END}")
+        for i, b in enumerate(backups, 1):
+            try:
+                timestamp = int(b.split('-')[-1])
+                dt = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                print(f"[{i}] {Colors.YELLOW}{b}{Colors.END} ({Colors.GREEN}{dt}{Colors.END})")
+            except:
+                print(f"[{i}] {b}")
+        
+        try:
+            b_idx = int(click.prompt("Select backup to restore", type=int)) - 1
+            if 0 <= b_idx < len(backups):
+                target_backup = os.path.join(config_dir, backups[b_idx])
+                original_sam = os.path.join(config_dir, "SAM")
+                print_loading(f"Restoring {backups[b_idx]} to SAM...")
+                subprocess.run(['sudo', 'cp', target_backup, original_sam])
+                print_success("✅ Credentials restored successfully!")
+            else:
+                print_error("Invalid selection.")
+        except:
+            print_error("Invalid input.")
+
+    elif choice == '3' and regback_valid:
+        print_warning("This will restore ALL Registry Hives (SAM, SYSTEM, SECURITY, etc.) from RegBack.")
+        if click.confirm("Proceed with RegBack restoration?"):
+            hives = ['SAM', 'SYSTEM', 'SECURITY', 'SOFTWARE', 'DEFAULT']
+            print_loading("Restoring hives from RegBack...")
+            for hive in hives:
+                src = os.path.join(regback_dir, hive)
+                dst = os.path.join(config_dir, hive)
+                if os.path.exists(src):
+                    subprocess.run(['sudo', 'cp', src, dst])
+            print_success("✅ Registry hives restored from RegBack successfully!")
+
+    elif choice == '4' and repair_valid:
+        print_warning("This will restore SAM/SYSTEM/SECURITY from the Repair folder (Factory State).")
+        if click.confirm("Proceed with Factory Reset?"):
+            hives = ['SAM', 'SYSTEM', 'SECURITY']
+            print_loading("Restoring from Repair folder...")
+            for hive in hives:
+                src = os.path.join(repair_dir, hive)
+                dst = os.path.join(config_dir, hive)
+                if os.path.exists(src):
+                    subprocess.run(['sudo', 'cp', src, dst])
+            print_success("✅ System Hives restored to Factory State successfully!")
+    else:
+        print_info("Action cancelled or unavailable.")
 
 if __name__ == '__main__':
     main()

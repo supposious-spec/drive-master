@@ -30,6 +30,10 @@
   - **Internal Drive Recovery**: Recover from internal drives
   - **Directory Recovery**: Recover from specific paths
   - **Advanced Recovery**: TestDisk GUI interface
+- 🔑 **Windows Password Removal**: Smart Reset technology (Safety First!)
+  - **RegBack Restore**: Restore credentials from automatic Windows backups
+  - **Repair Fallback**: Factory-state restoration for unbootable systems
+  - **Secure Backups**: Automatic timestamped SAM hive backups
 - 🧹 **Interface Control**: Clear screen and refresh options
 - 🌍 **Universal Drive Support**: Works with all drive types and filesystems
 
@@ -135,6 +139,7 @@ drive-master
 - `7`: 💾 Format USB Drive (FAT32/NTFS/EXT4) with Quick/Auto modes
 - `8`: 🔧 Fix Hidden/Problematic Drives with auto format option
 - `9`: 🔍 Recover Data from Drive/USB using TestDisk/PhotoRec
+- `P`: 🔑 Windows Password Removal (Smart Reset / RegBack)
 - `A`: 🗑️ Uninstall Drive Master (built-in uninstaller)
 - `C`: 🧹 Clear Screen (refresh interface)
 - `Q`: 🚪 Exit the tool
@@ -213,12 +218,9 @@ rm -rf ~/.local/lib/python*/site-packages/drive_master*
 
 ## 🔢 Version History
 
+- **v3.2.0** - **Smart Password Reset**: Safe Windows password recovery using RegBack/Repair hives. Fixed boot failures.
+- **v3.1.0** - **fdisk-First Discovery**: Refined drive detection using `fdisk -l` for 100% accuracy of all partitions (EFI, Reserved, etc.).
 - **v3.0.0** - Auto format functionality, enhanced fix options, improved UI alignment, comprehensive drive support
-- **v2.3.0** - Universal drive support, enhanced USB detection, back options, Ali Hamza credit
-- **v2.2.0** - Advanced USB formatting & data recovery with TestDisk integration
-- **v2.1.0** - USB formatting, built-in uninstaller, enhanced drive management
-- **v2.0.0** - Enhanced UI, unmount functionality, smart drive management, auto-update
-- **v1.0.0** - Initial release with basic mounting functionality
 
 ---
 
@@ -245,6 +247,7 @@ rm -rf ~/.local/lib/python*/site-packages/drive_master*
 [7] 💾 Format USB Drive (Quick/Auto modes)
 [8] 🔧 Fix Hidden/Problematic Drives
 [9] 🔍 Recover Data from Drive/USB
+[P] 🔑 Windows Password Removal
 [A] 🗑️ Uninstall Drive Master
 [C] 🧹 Clear Screen
 [Q] 🚪 Quit
